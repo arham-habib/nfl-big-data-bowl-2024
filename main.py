@@ -13,6 +13,9 @@ from concurrent.futures import ProcessPoolExecutor
 # imports from the utils.py script
 import utils as NFLUtils
 
+
+# TODO: This failed to cache the first 7 games because not all plays were accounted for 
+
 def main(): 
 
     games_file = './data/games.csv'
@@ -20,7 +23,7 @@ def main():
     games.head(10)
 
     start_time = time.time()
-    for label, row in games.iloc[6:].iterrows(): 
+    for label, row in games.iloc[7:].iterrows(): 
         print("Runtime: ", time.time() - start_time)
         try: 
             print(row)

@@ -206,7 +206,7 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame, weights: p
             filtered_frame_data = frame_data[frame_data.nflId != player_id]
             # calculate how much additional space the offense gets
             voronoi_filtered = assign_squares_to_players(filtered_frame_data, x_min=x_min, x_step=x_step, y_step=y_step)
-            protected_areas = voronoi_area(voronoi_filtered)[ball_carrier]
+            protected_areas = voronoi_area(voronoi_filtered).get(ball_carrier, 0)
             area_protected[player_id] = protected_areas - baseline_area  # how much more area do they get?
     
     # divide by the total sum of the frame to get tackle percentage contribution in each frame
