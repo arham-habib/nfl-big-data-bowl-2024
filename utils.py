@@ -219,7 +219,7 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame, weights: p
     return area_protected
 
 
-def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, weights:pd.DataFrame=None, x_step:int=1, y_step:int=1): 
+def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, weights:pd.DataFrame=None, x_step:int=1, y_step:int=1, animation:bool=True): 
     """
     This iterates through the frames in any given play and calculates the tackle percentage contribution of each player
     TODO: FIX THE CACULATION OF THE WEIGHTS
@@ -229,6 +229,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, weigh
     - weights (pd.DataFrame): 
     - x_step (int): the x-side of the voronoi bins when caling the assign_squres_to_players method
     - y_step (int): the y-side of the voronoi bins when caling the assign_squres_to_players method
+    - animation (bool): whether or not we want to make an MP4 of the play
 
     Returns: 
     - dictionary with keys of nflId and value of the tackle percentage contribution for that play
@@ -273,11 +274,12 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, weigh
     json.dump(total_tpc_converted, open(filepath+'/tpc.json', 'w'))
 
     # create an animation
-    create_animation(frame_dict=frame_dict, tpc_per_frame=tpc_per_frame, play_filepath=filepath, x_step=x_step, y_step=y_step)
+    if animation: 
+        create_animation(frame_dict=frame_dict, tpc_per_frame=tpc_per_frame, play_filepath=filepath, x_step=x_step, y_step=y_step)
 
     return total_tpc
 
-def analyze_play(key, play, filepath, x_step, y_step):
+def analyze_play(key, play, filepath, x_step, y_step, animation):
     """
     Wrapper function to analyze a single play. This function will be executed in parallel.
     Params: 
@@ -296,14 +298,14 @@ def analyze_play(key, play, filepath, x_step, y_step):
     try:
         # Calculate the tackle_percentage_contribution
         # Ensure that the tackle_percentage_contribution_per_play function is defined appropriately
-        play_tpc = tackle_percentage_contribution_per_play(frame_dict=play, filepath=play_filepath, x_step=x_step, y_step=y_step)
+        play_tpc = tackle_percentage_contribution_per_play(frame_dict=play, filepath=play_filepath, x_step=x_step, y_step=y_step, animation=animation)
 
         return {player: contribution for player, contribution in play_tpc.items()}
     except Exception as e:
         print(f'Error processing play {key}: {e}')
         return {}
 
-def analyze_game(game_id, tracking_file, x_step=1, y_step=1, plays_file='./data/plays.csv', players_file='./data/players.csv', game_file='./data/games.csv'):
+def analyze_game(game_id, tracking_file, x_step=1, y_step=1, plays_file='./data/plays.csv', players_file='./data/players.csv', game_file='./data/games.csv', animation:bool=True):
     """ 
     A method to analyze a game. Calling this will analyze and cache all the plays + the results of the analysis
     Param: 
@@ -332,7 +334,7 @@ def analyze_game(game_id, tracking_file, x_step=1, y_step=1, plays_file='./data/
 
     # Using ProcessPoolExecutor to parallelize the loop
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(analyze_play, key, play, filepath, x_step, y_step) for key, play in sorted_game_data_organized]
+        futures = [executor.submit(analyze_play, key, play, filepath, x_step, y_step, animation) for key, play in sorted_game_data_organized]
 
         for future in as_completed(futures):
             play_tpc = future.result()

@@ -15,23 +15,23 @@ import utils as NFLUtils
 
 
 # TODO: This failed to cache the first 7 games because not all plays were accounted for 
+# End the training set on 2022092502_IND_KC because that's where we stop caching the MP4s
 
 def main(): 
 
     games_file = './data/games.csv'
     games = pd.read_csv(games_file)
-    games.head(10)
 
     start_time = time.time()
-    for label, row in games.iloc[7:].iterrows(): 
-        print("Runtime: ", time.time() - start_time)
+    for label, row in games.iloc[36:].iterrows(): 
+        print(f"{label} ---- cumulative runtime: ", time.time() - start_time)
         try: 
             print(row)
             game_id = row.gameId
             week = row.week
-            results = NFLUtils.analyze_game(game_id=game_id, tracking_file=f'./data/tracking_week_{week}.csv')
-            time.sleep(30)  # doing this to not melt my processor overnight
-        except: 
+            results = NFLUtils.analyze_game(game_id=game_id, tracking_file=f'./data/tracking_week_{week}.csv', animation=False)
+        except Exception as e: 
+            print(e)
             continue
 
 if __name__ == '__main__': 
