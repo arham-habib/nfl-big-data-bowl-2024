@@ -13,10 +13,6 @@ from concurrent.futures import ProcessPoolExecutor
 # imports from the utils.py script
 import utils as NFLUtils
 
-
-# TODO: This failed to cache the first 7 games because not all plays were accounted for 
-# End the training set on 2022092502_IND_KC because that's where we stop caching the MP4s
-
 def main(): 
 
     games_file = './data/games.csv'
