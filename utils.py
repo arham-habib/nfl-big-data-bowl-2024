@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import scipy as sp
 import time
 import os
 import json
@@ -8,11 +9,11 @@ import matplotlib.patches as patches
 import matplotlib.path as mpltPath
 from matplotlib.collections import PatchCollection
 from matplotlib.animation import FuncAnimation
+from matplotlib.lines import Line2D
 from shapely.geometry import Polygon, box, LineString, Point
 from shapely.ops import unary_union
-from scipy.spatial import Voronoi, cKDTree, voronoi_plot_2d, ConvexHull
+from scipy.spatial import Voronoi, cKDTree, ConvexHull
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import scipy as sp
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------
 # Organizational methods
@@ -119,7 +120,7 @@ def organize_game_data(df: pd.DataFrame)->dict:
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------
 # Visualization methods
 
-def generate_color_map(nfl_ids):
+def generate_color_map_depracated(nfl_ids):
     """
     Generates a color map for given NFL IDs.
 
@@ -134,7 +135,7 @@ def generate_color_map(nfl_ids):
     color_map = {nfl_id: color for nfl_id, color in zip(nfl_ids, colors)}
     return color_map
 
-def create_animation(frame_dict: dict, tpc_per_frame: dict, play_filepath:str, x_min=0, x_max=120, y_min=0, y_max=53.3, x_step=1, y_step=1):
+def create_animation_depracated(frame_dict: dict, tpc_per_frame: dict, play_filepath:str, x_min=0, x_max=120, y_min=0, y_max=53.3, x_step=1, y_step=1):
     """
     Creates an animation of bucketed Voronoi spaces for different frames.
 
@@ -224,7 +225,7 @@ def create_animation(frame_dict: dict, tpc_per_frame: dict, play_filepath:str, x
     # plt.show()
     # return anim
 
-def visualize_field(frame:pd.DataFrame, x_min, color_map:dict=None, x_max=110, y_min=0, y_max=53.3, x_step=1, y_step=1):
+def visualize_field_depracated(frame:pd.DataFrame, x_min, color_map:dict=None, x_max=110, y_min=0, y_max=53.3, x_step=1, y_step=1):
 
     if not color_map: 
         color_map = generate_color_map(frame.nflId)
@@ -285,7 +286,7 @@ def visualize_field(frame:pd.DataFrame, x_min, color_map:dict=None, x_max=110, y
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------
 # Voronoi methods
 
-def assign_squares_to_players(frame_data, x_min=0, x_max=120, y_min=0, y_max=53.3, x_step=1, y_step=1):
+def assign_squares_to_players_depracated(frame_data, x_min=0, x_max=120, y_min=0, y_max=53.3, x_step=1, y_step=1):
     """
     Assigns each x_step by y_step square of a football field to the nearest player using Voronoi tessellation.
 
@@ -325,7 +326,7 @@ def assign_squares_to_players(frame_data, x_min=0, x_max=120, y_min=0, y_max=53.
     return squares
 
 
-def voronoi_area(squares: pd.DataFrame, weights: pd.DataFrame=None):
+def voronoi_area_depracated(squares: pd.DataFrame, weights: pd.DataFrame=None):
     """
     Return the area attributed to each unique player by nflID
 
@@ -356,23 +357,28 @@ def in_box(players, bounding_box):
                           np.logical_and(bounding_box[2] <= players[:, 1],
                                          players[:, 1] <= bounding_box[3]))
 
-def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3): 
+def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3, plot_graph:bool=False, tpc_dict:dict=None, ax=None): 
     """
-    Take 2: use mirroring to solve
-    df (pd.DataFrame): the data frame of frame_data from the organize_game_data method
+    Custom Voronoi utils. TLDR: mirror the points over x_min, x_max, y_min, y_max to create a boundaries. Use shoelace method to calculate area of each region. Some become negative because of quirks w the floating point numbers
+    
+    df (pd.DataFrame): the data frame of frame_data from the organize_game_data method. Has columsn: [nflId	time, playDirection, x, y, s, a, dis, o, dir, event, is_offense, ballCarrierId]
     x_min (float): the minimum x value at which we end analysis
-    x_max (float): default 100 because that's the endzone, the amount of defended territory
+    x_max (float): max x value analyzed, default 110 because that's the endzone
     y_min (float), y_max(float): bounds for y
+    plot_graph (bool): whether you want to generate a plot or not
+    tpc_dict (dict): a dictionary indexed by nflId with the TPC for that frame of every player. Used in the plot_graph if specified. 
+    ax: if calling from another method, pass the axis
     """
     
     # create a boundary 10 yards behind the ball carrier or 10 yds (start of endzone), whichever is greater
     if not x_min: 
         x_min = max(df[df.nflId==df.ballCarrierId.iloc[0]].x.iloc[0] - 10, 10)
 
-    df_filtered = df[df['x'].between(x_min, x_max) & df['y'].between(y_min, y_max)]
+    # filter points to the ones in the relevant region
+    df_filtered = df[df['x'].between(x_min, x_max) & df['y'].between(y_min, y_max)] # this seems redundant, but we need the df to be filtered to match each point to an nflId in the future. 
     players = df_filtered[['x', 'y']].to_numpy()
-
     bounding_box = (x_min, x_max, y_min, y_max)
+
     # Select towers inside the bounding box
     i = in_box(players, bounding_box)
     # Mirror points
@@ -394,29 +400,69 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
                                            axis=0),
                                  axis=0),
                        axis=0)
+    
     # Compute Voronoi
     vor = sp.spatial.Voronoi(points)
-    # Filter regions
-    regions = []
-    [vor.point_region[i] for i in range(10)]
 
+    # only pay attention to the points related to players in the relevant region
     vor.filtered_points = points_center
     vor.filtered_regions = [vor.regions[vor.point_region[i]] for i in range(len(points_center))]
-    areas = [ConvexHull(vor.vertices[vor.filtered_regions[idx], :]).volume for idx in range(len(vor.filtered_regions))]  # pull the areas and zip them to the vertices passed in
+    areas = [ConvexHull(vor.vertices[vor.filtered_regions[idx], :]).volume for idx in range(len(vor.filtered_regions))]  # pull the areas and zip them indexed to the vertices passed in
+
+    if plot_graph:
+
+        # Plot Voronoi diagram
+        if not ax: # if there is no tpc_dict, this method is being called by itself and not with the helper animation() within tackle_percentage_contribution_per_play(), so we create a figure and plot
+            fig, ax = plt.subplots(figsize=(24,16))
+
+        # clear whatever was on the axis before
+        ax.clear()
+        
+        # Plot boundaries
+        ax.add_patch(patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, fill=False, color='black'))
+
+        for i, region in enumerate(vor.filtered_regions):
+            polygon = [vor.vertices[i] for i in region]
+            ax.fill(*zip(*polygon), fill=False, color='white', edgecolor='black')
+
+            # Label points with nflId (smaller font size)
+            nfl_id = df_filtered.iloc[i]['nflId']
+            if tpc_dict: 
+                player_tpc = tpc_dict.get(nfl_id, "") # try getting the TPC, and if not found, return a null value
+            else:  # if no dict specified, no player has TPC
+                player_tpc=""
+            ax.text(vor.filtered_points[i][0], vor.filtered_points[i][1]-.75, f'{str(nfl_id)}: {player_tpc}', fontsize=10, ha='center', va='center') # the -.75 is to offset the points
+
+            # Color points based on conditions
+            if nfl_id == df_filtered.iloc[i]['ballCarrierId']:
+                ax.plot(vor.filtered_points[i][0], vor.filtered_points[i][1], 'ro', markersize=10, label='Ball Carrier')
+            elif nfl_id in df_filtered[df_filtered['is_offense']]['nflId'].tolist():
+                ax.plot(vor.filtered_points[i][0], vor.filtered_points[i][1], 'mo', markersize=10, label='Offense')
+            else:
+                ax.plot(vor.filtered_points[i][0], vor.filtered_points[i][1], 'go', markersize=10, label='Defense')
+
+        ballCarrierId = df_filtered[df_filtered['nflId'] == df_filtered.iloc[0]['ballCarrierId']]['ballCarrierId'].values[0]
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+        ax.set_xlabel('X-coordinate')
+        ax.set_ylabel('Y-coordinate')
+        ax.set_title(f'Voronoi Diagram (BallCarrierId: {ballCarrierId})')
+        legend_elements = [Line2D([0], [0], marker='o', color='w', label='Ball Carrier', markerfacecolor='r', markersize=10),
+                        Line2D([0], [0], marker='o', color='w', label='Offense', markerfacecolor='k', markersize=10),
+                        Line2D([0], [0], marker='o', color='w', label='Defense', markerfacecolor='g', markersize=10)]
+        ax.legend(handles=legend_elements)
     
     return dict(zip(df_filtered.nflId, areas))
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------
 # TPC Methods
 
-def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame, x_step: int=1, y_step: int=1)->dict:
+def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     """ 
     For every unique player attributed to a square on the defending team, take them out and see how much Voronoi area would be gained by the player in possession. 
 
     Params: 
     - frame_data (pd.DataFrame): a dataframe from the organize_game_data method with columns ['nflId', 'ballCarrierId', 'is_offense', 'x', 'y']
-    - x_step (int): the x-side of the voronoi bins when caling the assign_squres_to_players method
-    - y_step (int): the y-side of the voronoi bins when caling the assign_squres_to_players method
 
     Returns: 
     - dictionary with keys of nflId and value of the tackle percentage contribution for that frame
@@ -430,8 +476,6 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame, x_step: in
     # get the minimum x, after which we will cut off voronoi analysis
     x_min = max(10, frame_data.loc[frame_data.nflId==ball_carrier, 'x'].iloc[0] - 10) # we end the voronoi tesselation 10 yards behind the ball carrier or 10, whichever is greater
     baseline_area = calculate_voronoi_areas(frame_data, x_min=x_min).get(ball_carrier,0)
-    # squares = assign_squares_to_players(frame_data, x_min=x_min, x_step=x_step, y_step=y_step)
-    # baseline_area = voronoi_area(squares)[ball_carrier]
     
     for player_id in frame_data.nflId.unique(): 
         # break for the ball_carrier     
@@ -441,29 +485,17 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame, x_step: in
         filtered_frame_data = frame_data[frame_data.nflId != player_id]
         protected_areas = calculate_voronoi_areas(filtered_frame_data, x_min=x_min).get(ball_carrier,0)
         # calculate how much additional space the offense gets
-        # voronoi_filtered = assign_squares_to_players(filtered_frame_data, x_min=x_min, x_step=x_step, y_step=y_step)
-        # protected_areas = voronoi_area(voronoi_filtered)[ball_carrier]
-        area_protected[player_id] = protected_areas - baseline_area  # how much more area do they get?
-    
-    # divide by the total sum of the frame to get tackle percentage contribution in each frame
-    # I'm unconvinced this is the correct approach and I'm commenting out out for now, we can talk about this
-    # Basically, if no one is close to the player on offense, I think this will be misleading
-    # total_protected_area = sum(area_protected.values())
-    # for key, value in area_protected.items(): 
-    #     area_protected[key] = value / total_protected_area
+        area_protected[player_id] = round(protected_areas - baseline_area, 2)  # round to 2 decimal points
 
     return area_protected
 
-
-def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, x_step:int=1, y_step:int=1, animation:bool=False): 
+def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, animation:bool=False): 
     """
     This iterates through the frames in any given play and calculates the tackle percentage contribution of each player
     
     Params: 
     - frame_dict: dict from the organize_game_data method for each play
     - filepath (str): the filepath of the folder under which we are caching play data
-    - x_step (int): the x-side of the voronoi bins when caling the assign_squres_to_players method
-    - y_step (int): the y-side of the voronoi bins when caling the assign_squres_to_players method
     - animation (bool): whether or not we want to make an MP4 of the play
 
     Returns: 
@@ -479,7 +511,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, x_ste
     for key, frame in frame_dict_sorted: 
 
         # get protected areas, append to both dictionaries
-        frame_tpc = tackle_percentage_contribution_per_frame(frame, x_step, y_step)
+        frame_tpc = tackle_percentage_contribution_per_frame(frame)
         tpc_per_frame[key] = frame_tpc
 
         # append to the overall dict for the play
@@ -494,34 +526,50 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, x_ste
     for key, value in total_tpc.items():
         total_tpc[key] = value / total_protected_area
 
-
-    # Convert the dictionary with the frame data to a DataFrame to cache
-    # The keys of the outer dict become the index, and the inner dicts' keys become the column names
+    # Convert the dictionary with the frame data to a DataFrame to cache, the keys of the outer dict become the index, and the inner dicts' keys become the column names
     tpc_per_frame_df = pd.DataFrame.from_dict(tpc_per_frame, orient='index')
 
     # Save to CSV, with the index to make future multiplication easier
-    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_updated_voronoi.csv', index=True)
+    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame.csv', index=True)
 
     # cast everything to strings from int64 (otherwise cannot store in JSON)
-    total_tpc_converted = {str(key): value for key, value in total_tpc.items()}
+    total_tpc_converted = {int(key): value for key, value in total_tpc.items()}
 
     # cache this result as a JSON for each play
-    json.dump(total_tpc_converted, open(filepath+'/tpc_updated_voronoi.json', 'w'))
-
-    # create an animation
+    json.dump(total_tpc_converted, open(filepath+'/tpc.json', 'w'))
+    
+    # if the animation method is called
     if animation: 
-        create_animation(frame_dict=frame_dict, tpc_per_frame=tpc_per_frame, play_filepath=filepath, x_step=x_step, y_step=y_step)
+
+        # open plots were taking too much memory
+        plt.close('all')
+        
+        def animate(frame_number:int, ax:plt.Axes):
+            """
+            frame_number (int): the number of the frame, pulling from the nonlocal frame_dict 
+            ax (plt.ax): passing the axis for the whole gif into the method, doesn't work otherwise (not sure why)
+            """
+            # Get the dataframe for the current frame
+            current_frame = frame_dict[frame_number]
+
+            # Call the calculate_voronoi_areas function with plot_graph=True
+            calculate_voronoi_areas(current_frame, plot_graph=True, tpc_dict=tpc_per_frame[frame_number], ax=ax)
+
+        fig, ax = plt.subplots(figsize=(24, 16))
+        ani = FuncAnimation(fig, lambda x: animate(x, ax), frames=sorted(frame_dict.keys()), repeat=False)
+        
+        # Save the animation
+        ani.save(filepath + '/voronoi_visualizer.mp4', writer='ffmpeg')
 
     return total_tpc
 
-def analyze_play(key, play, filepath, x_step, y_step, animation):
+def analyze_play(key:int, play:dict, filepath:str, animation:bool):
     """
     Wrapper function to analyze a single play. This function will be executed in parallel.
     Params: 
     - key (int): the play number
     - play (dict): a dictionary of the frames (pd.DataFrame) of each play
     - filepath (str): the filepath of tha game within which we will save information/animations of the play
-    - x_step, y_step (float): the x/y step of each of the voronoi bins
     """
     print(key)  # For debugging purposes
 
@@ -533,22 +581,20 @@ def analyze_play(key, play, filepath, x_step, y_step, animation):
     try:
         # Calculate the tackle_percentage_contribution
         # Ensure that the tackle_percentage_contribution_per_play function is defined appropriately
-        play_tpc = tackle_percentage_contribution_per_play(frame_dict=play, filepath=play_filepath, x_step=x_step, y_step=y_step, animation=animation)
+        play_tpc = tackle_percentage_contribution_per_play(frame_dict=play, filepath=play_filepath, animation=animation)
 
         return {player: contribution for player, contribution in play_tpc.items()}
     except Exception as e:
         print(f'Error processing play {key}: {e}')
         return {}
 
-def analyze_game(game_id, tracking_file, x_step=1, y_step=1, plays_file='./data/plays.csv', players_file='./data/players.csv', game_file='./data/games.csv', animation:bool=False):
+def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_file='./data/games.csv', animation:bool=False):
     """ 
     A method to analyze a game. Calling this will analyze and cache all the plays + the results of the analysis
     Param: 
     - game_id (int): the ID of the game as found in the Kaggle cleaned data
     - tracking_file (str): the address of the file in which the tracking data is stored
-    - x_step, y_step (float): the x and y steps of each of the voronoi bins
     - plays_file (str): the address of the plays file
-    - players_file (str): the filepath of the file containing players [TODO: CURRENTLY UNUSED.]
     - game_file (str): the filepath of the file containing information about each game
     """
     
@@ -569,7 +615,7 @@ def analyze_game(game_id, tracking_file, x_step=1, y_step=1, plays_file='./data/
 
     # Using ProcessPoolExecutor to parallelize the loop
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(analyze_play, key, play, filepath, x_step, y_step, animation) for key, play in sorted_game_data_organized]
+        futures = [executor.submit(analyze_play, key, play, filepath, animation) for key, play in sorted_game_data_organized]
 
         for future in as_completed(futures):
             play_tpc = future.result()
@@ -577,7 +623,7 @@ def analyze_game(game_id, tracking_file, x_step=1, y_step=1, plays_file='./data/
                 game_tpc[player] = game_tpc.get(player, 0) + contribution
 
     # Convert game_tpc keys from int64 to string to store in JSON
-    game_tpc_converted = {str(key): value for key, value in game_tpc.items()}
+    game_tpc_converted = {int(key): value for key, value in game_tpc.items()}
 
     # Cache this result as a JSON for each game
     json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))

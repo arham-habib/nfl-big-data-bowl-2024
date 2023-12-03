@@ -57,3 +57,7 @@
 - [ ] Address that grouping the offensive player makes defensive calculations wack
     - make it such that if they're touching the space of another offensive player they become one unit?
     - has become easier now that I'm not breaking it into discrete blocks tbh, that was a stupid idea on my part
+
+## TODO: 
+ - change the voronoi animation to make the defenders and offensive players the same 
+ - add acceleration and velocity vectors of the ball_carrier
