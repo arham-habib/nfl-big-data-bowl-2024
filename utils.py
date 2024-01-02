@@ -228,7 +228,7 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
         ax.set_ylabel('Y-coordinate')
         ax.set_title(f'Voronoi Diagram (BallCarrierId: {ballCarrierId})')
         legend_elements = [Line2D([0], [0], marker='o', color='w', label='Ball Carrier', markerfacecolor='r', markersize=10),
-                        Line2D([0], [0], marker='o', color='w', label='Offense', markerfacecolor='k', markersize=10),
+                        Line2D([0], [0], marker='o', color='w', label='Offense', markerfacecolor='m', markersize=10),
                         Line2D([0], [0], marker='o', color='w', label='Defense', markerfacecolor='g', markersize=10)]
         ax.legend(handles=legend_elements)
     
@@ -336,7 +336,7 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     frame_data = calculate_voronoi_areas(frame_data)
     # frame_data['weighted_voronoi_area'] = frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s)) # (weighted)
     frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
-    frame_data = recognize_adjacent_players(frame_data)
+    frame_data = recognize_adjacent_players(frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
     
     # iterate through the IDs of the players
@@ -348,8 +348,8 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
         filtered_frame_data = frame_data[frame_data.nflId != player_id]
         filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
         # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s))
-        filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area
-        filtered_frame_data = recognize_adjacent_players(filtered_frame_data)
+        filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area # toggle to weight area or not
+        filtered_frame_data = recognize_adjacent_players(filtered_frame_data) # toggle to recognize adjacent players or not
         protected_area = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
         # calculate how much additional space the offense gets
         area_protected[player_id] = round(protected_area - baseline_area, 4)  # how much more area do they get?
