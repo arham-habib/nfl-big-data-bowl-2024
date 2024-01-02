@@ -1,3 +1,4 @@
 git rm --cached *.csv
 *.csv
+*.json
 *.mp4

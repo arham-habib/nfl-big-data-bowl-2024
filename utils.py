@@ -118,232 +118,7 @@ def organize_game_data(df: pd.DataFrame)->dict:
     return game_dict
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------
-# Visualization methods
-
-def generate_color_map_depracated(nfl_ids):
-    """
-    Generates a color map for given NFL IDs.
-
-    Parameters:
-    - nfl_ids: List of unique NFL IDs.
-
-    Returns:
-    - Dictionary mapping each NFL ID to a color.
-    """
-    nfl_ids = nfl_ids.dropna().unique()
-    colors = plt.cm.rainbow(np.linspace(0, 1, len(nfl_ids)))
-    color_map = {nfl_id: color for nfl_id, color in zip(nfl_ids, colors)}
-    return color_map
-
-def create_animation_depracated(frame_dict: dict, tpc_per_frame: dict, play_filepath:str, x_min=0, x_max=120, y_min=0, y_max=53.3, x_step=1, y_step=1):
-    """
-    Creates an animation of bucketed Voronoi spaces for different frames.
-
-    Parameters:
-    - frame_dict: Dictionary of DataFrames indexed by frame, each containing ['player_id', 'x', 'y'].
-    - tpc_per_frame (dict): returned from the tackle_percentage_contribution_per_play method that labels the contribution of each defensive player per play, each key is the frame
-    - play_filepath (str): the filepath used to save the animation 
-    - min_x (float): the min x value in the graph (long side of football field, 0-120)
-    - max_x (float): the max x
-    - min_y (float): the min y value in the graph (short axis of football field, 0-53.3)
-    - max_y (float): the max y
-    - frame (int): the frame in question, useful for locating the file
-    
-    Returns:
-    - None
-
-    """
-    # assign a color map for all players in the play, based on which players were active in the first frame
-    color_map = generate_color_map(frame_dict[sorted(frame_dict.keys())[0]].nflId) # from the first frame, pull all active players
-
-    # open plots were taking too much memory
-    plt.close('all')
-
-    # Function to draw a single frame for the animation
-    def draw_frame(frame_number):
-        
-        # Process the frame data to get the assignments
-        player_assignments = assign_squares_to_players(frame_dict[frame_number], x_min, x_max, y_min, y_max, x_step, y_step)
-        ball_carrier = frame_dict[frame_number].ballCarrierId.iloc[0]
-
-        nonlocal color_map
-        ax.clear()
-        ax.set_xlim(x_min, x_max)
-        ax.set_ylim(y_min, y_max)
-
-        # Create a list to hold all the rectangles
-        rectangles = []
-
-        # Create a list to hold the colors of each rectangle
-        rectangle_colors = []
-
-        for _, row in player_assignments.iterrows():
-
-            # plot the colors based on the closest player
-            player_id = row['closest_player_id']
-            square_color = color_map.get(player_id, 'grey')
-            rect = patches.Rectangle((row['square_x'] - 0.5, row['square_y'] - 0.5), 1, 1)
-            rectangles.append(rect)
-            rectangle_colors.append(square_color)
-
-        # Add labels at centroids
-        player_positions = zip(frame_dict[frame_number].nflId, frame_dict[frame_number].is_offense, frame_dict[frame_number].x, frame_dict[frame_number].y)
-        for player_id, is_offense, x, y in player_positions:
-
-            # Get tackle percentage contribution, default 0 for offense
-            tpc = tpc_per_frame[frame_number].get(player_id, 0) 
-
-            # label the offensive players, red=ball carrier, black=offense, white=defense
-            if player_id == ball_carrier: 
-                dot_color='red'
-            elif is_offense: 
-                dot_color='black'
-            else: 
-                dot_color='white'
-
-            # plot the dot for every player and their TPC
-            ax.plot(x, y, marker='o', markersize=5, markerfacecolor=dot_color)
-            ax.text(x, y, f'{player_id}: {tpc}', ha='center', va='center', fontsize=9)
-        # Create a PatchCollection and add it to the axis
-        pc = PatchCollection(rectangles, facecolor=rectangle_colors, edgecolor=None)
-        ax.add_collection(pc)
-
-        # Additional plot settings
-        ax.set_xlabel('Yards (X-axis)')
-        ax.set_ylabel('Yards (Y-axis)')
-        ax.set_title(f'Bucketed Voronoi Areas (ball carrier: {ball_carrier})')
-
-    # Create figure and axis for the animation
-    fig, ax = plt.subplots(figsize=(24, 12))
-
-    # Create the animation
-    anim = FuncAnimation(fig, draw_frame, frames=sorted(frame_dict.keys()), interval=200, repeat=False)
-
-    # To save the animation, uncomment the line below and specify the filename and writer
-    anim.save(play_filepath + f'/voronoi_visualizer.mp4', writer='ffmpeg')
-
-    # plt.show()
-    # return anim
-
-def visualize_field_depracated(frame:pd.DataFrame, x_min, color_map:dict=None, x_max=110, y_min=0, y_max=53.3, x_step=1, y_step=1):
-
-    if not color_map: 
-        color_map = generate_color_map(frame.nflId)
-
-    # Create a figure and axis for the plot
-    fig, ax = plt.subplots(figsize=(12, 6))
-    
-    # Process the frame data to get the assignments
-    player_assignments = assign_squares_to_players(frame, x_min, x_max, y_min, y_max, x_step, y_step)
-    ball_carrier = frame.ballCarrierId.iloc[0]
-
-    ax.clear()
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
-
-    # Create a list to hold all the rectangles
-    rectangles = []
-
-    # Create a list to hold the colors of each rectangle
-    rectangle_colors = []
-
-    for _, row in player_assignments.iterrows():
-
-        # plot the colors based on the closest player
-        player_id = row['closest_player_id']
-        square_color = color_map.get(player_id, 'grey')
-        rect = patches.Rectangle((row['square_x'] - 0.5, row['square_y'] - 0.5), 1, 1)
-        rectangles.append(rect)
-        rectangle_colors.append(square_color)
-
-    # Add labels at centroids
-    player_positions = zip(frame.nflId, frame.is_offense, frame.x, frame.y)
-    for player_id, is_offense, x, y in player_positions:
-
-        # Get tackle percentage contribution, default 0 for offense
-        tpc = voronoi_area(player_assignments).get(player_id, 0) 
-
-        # label the offensive players, red=ball carrier, black=offense, white=defense
-        if player_id == ball_carrier: 
-            dot_color='red'
-        elif is_offense: 
-            dot_color='black'
-        else: 
-            dot_color='white'
-
-        # plot the dot for every player and their TPC
-        ax.plot(x, y, marker='o', markersize=5, markerfacecolor=dot_color)
-        ax.text(x, y, f'{player_id}: {tpc}', ha='center', va='center', fontsize=9)
-    # Create a PatchCollection and add it to the axis
-    pc = PatchCollection(rectangles, facecolor=rectangle_colors, edgecolor=None)
-    ax.add_collection(pc)
-
-    # Additional plot settings
-    ax.set_xlabel('Yards (X-axis)')
-    ax.set_ylabel('Yards (Y-axis)')
-    ax.set_title(f'Bucketed Voronoi Areas (ball carrier: {ball_carrier})')
-
-# -----------------------------------------------------------------------------------------------------------------------------------------------------------
 # Voronoi methods
-
-def assign_squares_to_players_depracated(frame_data, x_min=0, x_max=120, y_min=0, y_max=53.3, x_step=1, y_step=1):
-    """
-    Assigns each x_step by y_step square of a football field to the nearest player using Voronoi tessellation.
-
-    Parameters:
-    - frame_data (pd.DataFrame): DataFrame with columns ['nflId', 'x', 'y'] representing players' positions.
-    - x_min, x_max (float): Optional. The minimum and maximum x-coordinates (in yards) of the field area to consider.(0-120 yards)
-    - y_min, y_max (float): Optional. The minimum and maximum y-coordinates (in yards) of the field area to consider.(0-53.3 yards)
-    - x_step, y_step (float): Optional. The size of each Voronoi bucket, defaults to 1 yd by 1 yd
-
-    Returns:
-    - A DataFrame with columns ['square_x', 'square_y', 'closest_player_id', 'ball_carrier', 'is_offense'].
-    """
-    # modify the frame_data such that ever offensive player gets the ballCarrierId (assume they share voronoi space)
-    # commenting this out for the moment because it wasn't helping the analysis, but in the future, make it such that if they're touching the space of another offensive player they become one unit
-    ball_carrier = frame_data.ballCarrierId.iloc[0]
-    # frame_data.loc[frame_data.is_offense == True, 'nflId'] = ball_carrier
-
-    # Generate Voronoi diagram
-    points = frame_data[['x', 'y']].values
-    vor = Voronoi(points)
-    # fig = voronoi_plot_2d(vor)
-    # plt.show()  # for debug purposes 
-
-    # Generate all 1-yard squares within specified limits
-    x_range = np.arange(x_min, x_max + x_step, x_step)
-    y_range = np.arange(y_min, y_max + y_step, y_step)
-    squares = pd.DataFrame([(x, y) for x in x_range for y in y_range], columns=['square_x', 'square_y'])
-
-    # Create a KDTree for efficient nearest neighbor search
-    tree = cKDTree(points)
-
-    # Assign each square to the closest player based on Voronoi regions
-    squares['closest_player_id'] = squares.apply(lambda row: frame_data.iloc[tree.query((row['square_x'], row['square_y']))[1]]['nflId'], axis=1)
-    # get the ID of the ball carrier
-    squares['ball_carrier'] = ball_carrier
-
-    return squares
-
-
-def voronoi_area_depracated(squares: pd.DataFrame, weights: pd.DataFrame=None):
-    """
-    Return the area attributed to each unique player by nflID
-
-    Params: 
-    - squares (pd.DataFrame): a dataframe with columns ['square_x', 'square_y', 'closest_player_id'].
-    - weights (pd.DataFrame): 
-
-    Returns: 
-    - a dictionary with keys of closest_player_id and values of the voronoi areas, in square yards (we can modify this later with the weights)
-    """
-    # this is the case where we weight each Voronoi bin differently -- we can implement this later
-    if weights: 
-        return 
-    else:
-        voronoi_areas = squares.groupby('closest_player_id').size().to_dict()
-    
-    return voronoi_areas
 
 def in_box(players, bounding_box):
     """ 
@@ -363,7 +138,7 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
     
     df (pd.DataFrame): the data frame of frame_data from the organize_game_data method. Has columsn: [nflId	time, playDirection, x, y, s, a, dis, o, dir, event, is_offense, ballCarrierId]
     x_min (float): the minimum x value at which we end analysis
-    x_max (float): max x value analyzed, default 110 because that's the endzone
+    x_max (float): max x value in the analysis, default 110 because that's the endzone
     y_min (float), y_max(float): bounds for y
     plot_graph (bool): whether you want to generate a plot or not
     tpc_dict (dict): a dictionary indexed by nflId with the TPC for that frame of every player. Used in the plot_graph if specified. 
@@ -375,7 +150,7 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
         x_min = max(df[df.nflId==df.ballCarrierId.iloc[0]].x.iloc[0] - 10, 10)
 
     # filter points to the ones in the relevant region
-    df_filtered = df[df['x'].between(x_min, x_max) & df['y'].between(y_min, y_max)] # this seems redundant, but we need the df to be filtered to match each point to an nflId in the future. 
+    df_filtered = df[df['x'].between(x_min, x_max) & df['y'].between(y_min, y_max)].copy() # this seems redundant, but we need the df to be filtered to match each point to an nflId in the future. 
     players = df_filtered[['x', 'y']].to_numpy()
     bounding_box = (x_min, x_max, y_min, y_max)
 
@@ -407,8 +182,12 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
     # only pay attention to the points related to players in the relevant region
     vor.filtered_points = points_center
     vor.filtered_regions = [vor.regions[vor.point_region[i]] for i in range(len(points_center))]
+    vertices = [vor.vertices[vor.filtered_regions[idx], :] for idx in range(len(vor.filtered_regions))]
     areas = [ConvexHull(vor.vertices[vor.filtered_regions[idx], :]).volume for idx in range(len(vor.filtered_regions))]  # pull the areas and zip them indexed to the vertices passed in
+    df_filtered['voronoi_area'] = areas
+    df_filtered['vertices'] = vertices
 
+    # optionally, plot the graph
     if plot_graph:
 
         # Plot Voronoi diagram
@@ -419,7 +198,7 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
         ax.clear()
         
         # Plot boundaries
-        ax.add_patch(patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, fill=False, color='black'))
+        # ax.add_patch(patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, fill=False, color='black'))
 
         for i, region in enumerate(vor.filtered_regions):
             polygon = [vor.vertices[i] for i in region]
@@ -444,6 +223,7 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
         ballCarrierId = df_filtered[df_filtered['nflId'] == df_filtered.iloc[0]['ballCarrierId']]['ballCarrierId'].values[0]
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
+        # ax.gca().set_aspect('equal', adjustable='box')
         ax.set_xlabel('X-coordinate')
         ax.set_ylabel('Y-coordinate')
         ax.set_title(f'Voronoi Diagram (BallCarrierId: {ballCarrierId})')
@@ -452,8 +232,87 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
                         Line2D([0], [0], marker='o', color='w', label='Defense', markerfacecolor='g', markersize=10)]
         ax.legend(handles=legend_elements)
     
-    return dict(zip(df_filtered.nflId, areas))
+    return df_filtered
 
+def angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y):
+    vector_to_point = np.array([x - x_0, y - y_0])
+    velocity_vector = np.array([velocity_x, velocity_y])
+    magnitude_vector_to_point = np.linalg.norm(vector_to_point)
+    magnitude_velocity_vector = np.linalg.norm(velocity_vector)
+    dot_product = np.dot(velocity_vector, vector_to_point)
+    cosine_theta = dot_product / (magnitude_velocity_vector * magnitude_vector_to_point)
+    theta_radians = np.arccos(cosine_theta)
+    theta_degrees = np.degrees(theta_radians)
+    abs_theta_degrees = np.abs(theta_degrees)
+    return theta_degrees
+
+def weight_space(x_0, y_0, velocity_x, velocity_y, x, y, speed):
+    distance = np.sqrt((x - x_0)**2 + (y - y_0)**2)
+    angle_from_velocity = angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y)
+    angle_from_endzone = angle_from_vector(x_0, y_0, 1, 0, x, y)
+    return 1 / ((distance**(1/4)) * ((speed / 2) * angle_from_velocity + angle_from_endzone)**(1/2))
+
+def calculate_weighted_area(vertices, x_0, y_0, dir, speed):
+  '''
+  vertices: list of tuples representing the coordinates that define the voronoi space
+  x_0, y_0: position of the ball carrier
+  dir: direction of the ball carrier
+  speed: speed of the ball carrier
+  '''
+  velocity_x = speed * np.sin(np.radians(dir)) * 10
+  velocity_y = speed * np.cos(np.radians(dir)) * 10
+
+  area = 0.0
+  for i in range(len(vertices)):
+      x1, y1 = vertices[i]
+      w1 = weight_space(x_0, y_0, velocity_x, velocity_y, x1, y1, speed)
+      x2, y2 = vertices[(i + 1) % len(vertices)]
+      w2 = weight_space(x_0, y_0, velocity_x, velocity_y, x2, y2, speed)
+      area += (x1 * y2 * w2 - x2 * y1 * w1)
+
+  area = 0.5 * abs(area)
+  return area
+
+def check_matching_vertices(vertices, ball_carrier_vertices, x_min, x_max, y_min, y_max):
+    matching_vertices = [v for v in vertices if v in ball_carrier_vertices and (x_min < v[0] and v[0] < x_max) and (y_min < v[1] and v[1] < y_max)]
+    return len(matching_vertices) >= 2
+
+def recognize_adjacent_players(df:pd.DataFrame, x_min:float=None, x_max=110, y_min=0, y_max=53.3)->pd.DataFrame:
+    """ 
+    Return a adjusted voronoi analysis that adds the voronoi areas of blockers immediately adjacent to the ball carrier.
+
+    Params: 
+    - df (pd.DataFrame): output of the calculate_voronoi_areas method
+    - x_min:float=None, x_max=110, y_min=0, y_max=53.3 the boundaries of the method
+
+    Returns: 
+    - df (pd.DataFrame): the only number different is the voronoi_area of the ballCarrierId
+    """
+
+    # create a boundary 10 yards behind the ball carrier or 10 yds (start of endzone), whichever is greater
+    if not x_min: 
+        x_min = max(df[df.nflId==df.ballCarrierId.iloc[0]].x.iloc[0] - 10, 10)
+    
+    # Find the row where nflId equals ballCarrierId
+    ball_carrier_row = df[df['nflId'] == df['ballCarrierId']].iloc[0]
+    ball_carrier_vertices = ball_carrier_row['vertices']
+
+    # Initialize the additional area
+    additional_area = 0
+
+    # Filter out non-offense players and the ball carrier
+    offense_players = df[(df['is_offense']) & (df['nflId'] != df['ballCarrierId'])].copy()
+
+    # Apply the function to check for matching vertices
+    offense_players['matching_vertices'] = offense_players.vertices.apply(check_matching_vertices, args=(ball_carrier_vertices, x_min, x_max, y_min, y_max))
+
+    # Calculate the additional area
+    additional_area = offense_players[offense_players['matching_vertices']]['weighted_voronoi_area'].sum()
+
+    # Update the ball carrier's voronoi area
+    df.loc[df['nflId'] == df['ballCarrierId'], 'weighted_voronoi_area'] += additional_area
+    
+    return df
 # ---------------------------------------------------------------------------------------------------------------------------------------------------
 # TPC Methods
 
@@ -467,25 +326,33 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     Returns: 
     - dictionary with keys of nflId and value of the tackle percentage contribution for that frame
     """
-    
     area_protected = {}
     # get the ball carrier and offensive players
-    ball_carrier = frame_data.ballCarrierId.iloc[0]
-    offensive_players = dict(zip(frame_data.nflId, frame_data.is_offense))
+    ballCarrier = frame_data.ballCarrierId.iloc[0]
+    x, y, dir, s = frame_data[frame_data.nflId==ballCarrier].iloc[0].loc[['x', 'y', 'dir', 's']]  # get the x, y, direction, and speed of the ball carrier for weighting method
+    offensive_players = dict(zip(frame_data.nflId, frame_data.is_offense)) # dict to store whether the player is offense or not
 
     # get the minimum x, after which we will cut off voronoi analysis
-    x_min = max(10, frame_data.loc[frame_data.nflId==ball_carrier, 'x'].iloc[0] - 10) # we end the voronoi tesselation 10 yards behind the ball carrier or 10, whichever is greater
-    baseline_area = calculate_voronoi_areas(frame_data, x_min=x_min).get(ball_carrier,0)
+    frame_data = calculate_voronoi_areas(frame_data)
+    # frame_data['weighted_voronoi_area'] = frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s)) # (weighted)
+    frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
+    frame_data = recognize_adjacent_players(frame_data)
+    baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
     
+    # iterate through the IDs of the players
     for player_id in frame_data.nflId.unique(): 
         # break for the ball_carrier     
         if offensive_players[player_id]: 
             continue
         # take the frame data if that player didn't exist
         filtered_frame_data = frame_data[frame_data.nflId != player_id]
-        protected_areas = calculate_voronoi_areas(filtered_frame_data, x_min=x_min).get(ball_carrier,0)
+        filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
+        # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s))
+        filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area
+        filtered_frame_data = recognize_adjacent_players(filtered_frame_data)
+        protected_area = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
         # calculate how much additional space the offense gets
-        area_protected[player_id] = round(protected_areas - baseline_area, 2)  # round to 2 decimal points
+        area_protected[player_id] = round(protected_area - baseline_area, 4)  # how much more area do they get?
 
     return area_protected
 
@@ -526,17 +393,21 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
     for key, value in total_tpc.items():
         total_tpc[key] = value / total_protected_area
 
-    # Convert the dictionary with the frame data to a DataFrame to cache, the keys of the outer dict become the index, and the inner dicts' keys become the column names
+
+    # Convert the dictionary with the frame data to a DataFrame to cache
+    # The keys of the outer dict become the index, and the inner dicts' keys become the column names
     tpc_per_frame_df = pd.DataFrame.from_dict(tpc_per_frame, orient='index')
 
     # Save to CSV, with the index to make future multiplication easier
-    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame.csv', index=True)
+    # tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted.csv', index=True)
+    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_unweighted.csv', index=True)
 
     # cast everything to strings from int64 (otherwise cannot store in JSON)
     total_tpc_converted = {int(key): value for key, value in total_tpc.items()}
 
     # cache this result as a JSON for each play
-    json.dump(total_tpc_converted, open(filepath+'/tpc.json', 'w'))
+    # json.dump(total_tpc_converted, open(filepath+'/tpc_weighted.json', 'w'))
+    json.dump(total_tpc_converted, open(filepath+'/tpc_unweighted.json', 'w'))
     
     # if the animation method is called
     if animation: 
@@ -559,7 +430,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
         ani = FuncAnimation(fig, lambda x: animate(x, ax), frames=sorted(frame_dict.keys()), repeat=False)
         
         # Save the animation
-        ani.save(filepath + '/voronoi_visualizer.mp4', writer='ffmpeg')
+        ani.save(filepath + '/voronoi_visualizer_unweighted.mp4', writer='ffmpeg')
 
     return total_tpc
 
@@ -626,77 +497,8 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
     game_tpc_converted = {int(key): value for key, value in game_tpc.items()}
 
     # Cache this result as a JSON for each game
-    json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))
+    # json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))
+    json.dump(game_tpc_converted, open(filepath + '/game_tpc_unweighted.json', 'w'))
 
     return game_tpc
 
-# -----------------------------------------------------------------------------------------------------------------------------------------------------------------
-# Euclidean Distance utils
-
-def euclidean_distance_per_frame(frame_data:pd.DataFrame)->dict: 
-    """ 
-    Params: 
-    - frame_data (pd.DataFrame): a dataframe from the organize_game_data method with columns ['nflId', 'ballCarrierId', 'is_offense', 'x', 'y']
-    Returns: 
-    - distance_dict (dict): a dict where the keys are the player IDs and the values are the distances
-    """
-    ball_carrier = frame_data.ballCarrierId.iloc[0]
-    x, y = frame_data[frame_data.nflId==ball_carrier][['x', 'y']].iloc[0]
-    defense = frame_data[~frame_data.is_offense].nflId
-    distances = [np.sqrt((x-x_d)**2 + (y-y_d)**2) for x_d, y_d in zip(frame_data[~frame_data.is_offense].x, frame_data[~frame_data.is_offense].y)]
-    distance_dict = dict(zip(defense, distances))
-
-    return distance_dict
-
-def euclidean_distance_per_play(frame_dict:dict, filepath:str)->dict: 
-    """ 
-    Calculate the Euclidean distances of each of the defenders from the ball
-    Params: 
-    - frame_dict: dict from the organize_game_data method for each play
-    - filepath: the path of each play, under which we can cache the data
-    """
-    # Create a directory for the game if none exists
-    if not os.path.exists(filepath):
-        os.makedirs(filepath)
-    frame_distances = {}
-    
-    # sort the frames
-    frame_dict_sorted = sorted(frame_dict.items(), key=lambda x: x[0])
-    # iterate through the frames of the play
-    for key, frame in frame_dict_sorted: 
-        frame_distances[key] = euclidean_distance_per_frame(frame)
-
-    # Convert the dictionary with the frame data to a DataFrame to cache
-    # The keys of the outer dict become the index, and the inner dicts' keys become the column names
-    frame_distances_df = pd.DataFrame.from_dict(frame_distances, orient='index')
-
-    # Save to CSV, with the index to make future multiplication easier
-    frame_distances_df.to_csv(f'{filepath}/distances_per_frame.csv', index=True)
-    
-    return frame_distances
-
-def analyze_game_distances(game_id, tracking_file, plays_file='./data/plays.csv', game_file='./data/games.csv')->None:
-    """ 
-    A method to cache the distances of the players from the ball at all times
-    Params: 
-    - game_id (int): the ID of the game as found in the Kaggle cleaned data
-    - tracking_file (str): the address of the file in which the tracking data is stored
-    - plays_file (str): the address of the plays file
-    - game_file (str): the filepath of the file containing information about each game
-    """
-    # read information about all the games
-    games = pd.read_csv(game_file)
-    game_data = games[games.gameId==game_id].iloc[0, [0, 5, 6]] # pull the ID (col 0), home team (col 5), visitng team (col 6)
-    filepath = f'./games/{game_data.iloc[0]}_{game_data.iloc[1]}_{game_data.iloc[2]}'
-
-    # Create a directory for the game if none exists
-    if not os.path.exists(filepath):
-        os.makedirs(filepath)
-
-    # Sort and organize the data
-    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id))
-    sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
-
-    # Using ProcessPoolExecutor to parallelize the loop
-    with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(euclidean_distance_per_play, play, f'{filepath}/{key}') for key, play in sorted_game_data_organized]
