@@ -12,7 +12,7 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
 from shapely.geometry import Polygon, box, LineString, Point
 from shapely.ops import unary_union
-from scipy.spatial import Voronoi, cKDTree, ConvexHull
+from scipy.spatial import Voronoi, cKDTree, ConvexHull, Delaunay
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -132,7 +132,7 @@ def in_box(players, bounding_box):
                           np.logical_and(bounding_box[2] <= players[:, 1],
                                          players[:, 1] <= bounding_box[3]))
 
-def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3, plot_graph:bool=False, tpc_dict:dict=None, ax=None): 
+def calculate_voronoi_areas(df, x_min:float=10, x_max=110, y_min=0, y_max=53.3, plot_graph:bool=False, tpc_dict:dict=None, ax=None): 
     """
     Custom Voronoi utils. TLDR: mirror the points over x_min, x_max, y_min, y_max to create a boundaries. Use shoelace method to calculate area of each region. Some become negative because of quirks w the floating point numbers
     
@@ -234,6 +234,66 @@ def calculate_voronoi_areas(df, x_min:float=None, x_max=110, y_min=0, y_max=53.3
     
     return df_filtered
 
+# ---------------------------------------------------------------------------------------------------------------------------------------
+# Blocker methods
+
+def ccw(a, b, c)->bool:
+    return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+def line_intersects_segment(p1: list[float, float], p2: list[float, float], 
+                            q1: list[float, float], q2: list[float, float]) -> bool:
+    """
+    Check if the line segment p1-p2 intersects with the line segment q1-q2.
+    """
+    return (ccw(p1, q1, q2) != ccw(p2, q1, q2) and ccw(p1, p2, q1) != ccw(p1, p2, q2))
+
+def find_clear_path(df:pd.DataFrame)->list:
+    """
+    Find a player's position that has a clear path from the ball carrier.
+    If a clear path exists, return the index of that player's position. 
+    If not, return -1.
+    """
+    # empty list to hold blockers
+    blockers = []
+
+    # record the ball carrier's vertices
+    ball_carrier_row = df[df['nflId'] == df['ballCarrierId']].iloc[0]
+    x_0, y_0 = ball_carrier_row[['x', 'y']]
+    # record the offensive player positions
+    player_positions = df[df.is_offense][['nflId', 'x','y']]
+    # record the voronoi regions of the defensive players
+    voronoi_regions = df[~df.is_offense]['vertices']
+    
+    # iterate over the positions of the offensive players that are potentially blockers
+    for _, id, x, y in player_positions.itertuples():
+        # break for the ball carrier 
+        if id == ball_carrier_row.nflId:
+            continue
+        path_clear = True
+        for polygon in voronoi_regions:
+            for j in range(len(polygon)):
+                # Check if the line intersects with any of the polygon's edges
+                if line_intersects_segment((x_0, y_0), (x,y), polygon[j], polygon[(j + 1) % len(polygon)]):
+                    path_clear = False
+                    break
+            if not path_clear:
+                break
+        
+        if path_clear:
+            blockers.append(id)  # Clear path found to this player
+
+    return blockers
+
+def recognize_blockers(df:pd.DataFrame):
+    blockers = find_clear_path(df)
+    additional_area = df[df['nflId'].isin(blockers)]['weighted_voronoi_area'].sum()
+    # Update the ball carrier's voronoi area
+    df.loc[df['nflId'] == df['ballCarrierId'], 'weighted_voronoi_area'] += additional_area
+    return df, blockers
+
+# ----------------------------------------------------------------------------------------------------------------------------------
+# Weighted Area Methods
+
 def angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y):
     vector_to_point = np.array([x - x_0, y - y_0])
     velocity_vector = np.array([velocity_x, velocity_y])
@@ -246,73 +306,53 @@ def angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y):
     abs_theta_degrees = np.abs(theta_degrees)
     return theta_degrees
 
-def weight_space(x_0, y_0, velocity_x, velocity_y, x, y, speed):
-    distance = np.sqrt((x - x_0)**2 + (y - y_0)**2)
-    angle_from_velocity = angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y)
-    angle_from_endzone = angle_from_vector(x_0, y_0, 1, 0, x, y)
-    return 1 / ((distance**(1/4)) * ((speed / 2) * angle_from_velocity + angle_from_endzone)**(1/2))
+def weight_space(x_0,y_0, velocity_x, velocity_y, x, y, max_x=120, max_y=53.3):
+  # TO-DO: try scaling angle_from_velocity up by velocity, try scaling down penalty by distance instead of constant
+  angle_from_velocity = angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y)
+  angle_from_endzone = angle_from_vector(x_0, y_0, max_x - x_0, (max_y / 2) - y_0, x, y)
+  distance = np.sqrt((x - x_0)**2 + (y - y_0)**2)
+  speed = np.sqrt((velocity_x**2) + (velocity_y**2))
+  penalty = (angle_from_velocity + angle_from_endzone) / (360 * 4)
+  weight = 1 / (0.5 + distance**0.5) - penalty
+  return weight
 
-def calculate_weighted_area(vertices, x_0, y_0, dir, speed):
-  '''
-  vertices: list of tuples representing the coordinates that define the voronoi space
-  x_0, y_0: position of the ball carrier
-  dir: direction of the ball carrier
-  speed: speed of the ball carrier
-  '''
-  velocity_x = speed * np.sin(np.radians(dir)) * 10
-  velocity_y = speed * np.cos(np.radians(dir)) * 10
+def trapezoidal_rule_triangle(x, y, f, x_0, y_0, velocity_x, velocity_y):
+    # Apply trapezoidal rule to a single triangle
+    area = 0.5 * (f(x_0, y_0, velocity_x, velocity_y, x[0], y[0]) + f(x_0, y_0, velocity_x, velocity_y, x[1], y[1]) +
+                  f(x_0, y_0, velocity_x, velocity_y, x[2], y[2]))
+    return area
 
-  area = 0.0
-  for i in range(len(vertices)):
-      x1, y1 = vertices[i]
-      w1 = weight_space(x_0, y_0, velocity_x, velocity_y, x1, y1, speed)
-      x2, y2 = vertices[(i + 1) % len(vertices)]
-      w2 = weight_space(x_0, y_0, velocity_x, velocity_y, x2, y2, speed)
-      area += (x1 * y2 * w2 - x2 * y1 * w1)
+def trapezoidal_weighted_area(vertices, f, x_0, y_0, velocity_x, velocity_y):
+    triangulation = Delaunay(vertices)
 
-  area = 0.5 * abs(area)
-  return area
+    total_area = 0
+    for simplex in triangulation.simplices:
+        x_triangle = vertices[simplex, 0]
+        y_triangle = vertices[simplex, 1]
+        total_area += trapezoidal_rule_triangle(x_triangle, y_triangle, f, x_0, y_0, velocity_x, velocity_y)
 
-def check_matching_vertices(vertices, ball_carrier_vertices, x_min, x_max, y_min, y_max):
-    matching_vertices = [v for v in vertices if v in ball_carrier_vertices and (x_min < v[0] and v[0] < x_max) and (y_min < v[1] and v[1] < y_max)]
-    return len(matching_vertices) >= 2
+    return total_area
 
-def recognize_adjacent_players(df:pd.DataFrame, x_min:float=None, x_max=110, y_min=0, y_max=53.3)->pd.DataFrame:
-    """ 
-    Return a adjusted voronoi analysis that adds the voronoi areas of blockers immediately adjacent to the ball carrier.
+def simpsons_rule_triangle(x, y, f, x_0, y_0, velocity_x, velocity_y):
+    # Apply Simpson's rule to a single triangle
+    area = (f(x_0, y_0, velocity_x, velocity_y, x[0], y[0]) +
+            4 * f(x_0, y_0, velocity_x, velocity_y, (x[0] + x[1]) / 2, (y[0] + y[1]) / 2) +
+            f(x_0, y_0, velocity_x, velocity_y, x[1], y[1]) +
+            4 * f(x_0, y_0, velocity_x, velocity_y, (x[1] + x[2]) / 2, (y[1] + y[2]) / 2) +
+            f(x_0, y_0, velocity_x, velocity_y, x[2], y[2])) / 6.0
+    return area
 
-    Params: 
-    - df (pd.DataFrame): output of the calculate_voronoi_areas method
-    - x_min:float=None, x_max=110, y_min=0, y_max=53.3 the boundaries of the method
+def simpsons_weighted_area(vertices, f, x_0, y_0, velocity_x, velocity_y):
+    triangulation = Delaunay(vertices)
 
-    Returns: 
-    - df (pd.DataFrame): the only number different is the voronoi_area of the ballCarrierId
-    """
+    total_area = 0
+    for simplex in triangulation.simplices:
+        x_triangle = vertices[simplex, 0]
+        y_triangle = vertices[simplex, 1]
+        total_area += simpsons_rule_triangle(x_triangle, y_triangle, f, x_0, y_0, velocity_x, velocity_y)
 
-    # create a boundary 10 yards behind the ball carrier or 10 yds (start of endzone), whichever is greater
-    if not x_min: 
-        x_min = max(df[df.nflId==df.ballCarrierId.iloc[0]].x.iloc[0] - 10, 10)
-    
-    # Find the row where nflId equals ballCarrierId
-    ball_carrier_row = df[df['nflId'] == df['ballCarrierId']].iloc[0]
-    ball_carrier_vertices = ball_carrier_row['vertices']
+    return total_area
 
-    # Initialize the additional area
-    additional_area = 0
-
-    # Filter out non-offense players and the ball carrier
-    offense_players = df[(df['is_offense']) & (df['nflId'] != df['ballCarrierId'])].copy()
-
-    # Apply the function to check for matching vertices
-    offense_players['matching_vertices'] = offense_players.vertices.apply(check_matching_vertices, args=(ball_carrier_vertices, x_min, x_max, y_min, y_max))
-
-    # Calculate the additional area
-    additional_area = offense_players[offense_players['matching_vertices']]['weighted_voronoi_area'].sum()
-
-    # Update the ball carrier's voronoi area
-    df.loc[df['nflId'] == df['ballCarrierId'], 'weighted_voronoi_area'] += additional_area
-    
-    return df
 # ---------------------------------------------------------------------------------------------------------------------------------------------------
 # TPC Methods
 
@@ -336,8 +376,10 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     frame_data = calculate_voronoi_areas(frame_data)
     # frame_data['weighted_voronoi_area'] = frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s)) # (weighted)
     frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
-    frame_data = recognize_adjacent_players(frame_data) # (toggle to recognize adjacent blockers or not)
+    frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+    # print(f'baseline area of ball carrier: {baseline_area}')
+    # print(f'initial blockers: {blockers}')
     
     # iterate through the IDs of the players
     for player_id in frame_data.nflId.unique(): 
@@ -349,8 +391,10 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
         filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
         # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s))
         filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area # toggle to weight area or not
-        filtered_frame_data = recognize_adjacent_players(filtered_frame_data) # toggle to recognize adjacent players or not
+        filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # toggle to recognize adjacent players or not
         protected_area = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+        # DEBUG
+        # print(f'{player_id} removed, blockers: {blockers}, protected area: {protected_area}')
         # calculate how much additional space the offense gets
         area_protected[player_id] = round(protected_area - baseline_area, 4)  # how much more area do they get?
 
@@ -376,6 +420,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
     frame_dict_sorted = sorted(frame_dict.items(), key=lambda x: x[0])
     # iterate through the frames of the play
     for key, frame in frame_dict_sorted: 
+        # print(f'################################## {key} ###############################')
 
         # get protected areas, append to both dictionaries
         frame_tpc = tackle_percentage_contribution_per_frame(frame)
@@ -502,3 +547,84 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
 
     return game_tpc
 
+def analyze_game_unparallelized(game_id, tracking_file, plays_file='./data/plays.csv', players_file='./data/players.csv', game_file='./data/games.csv', animation:bool=False):
+    """ 
+    A method to analyze a game. Calling this will analyze and cache all the plays + the results of the analysis
+    Param: 
+    - game_id (int): the ID of the game as found in the Kaggle cleaned data
+    - tracking_file (str): the address of the file in which the tracking data is stored
+    - x_step, y_step (float): the x and y steps of each of the voronoi bins
+    - plays_file (str): the address of the plays file
+    - players_file (str): the filepath of the file containing players [TODO: CURRENTLY UNUSED.]
+    - game_file (str): the filepath of the file containing information about each game
+    """
+    
+    games = pd.read_csv(game_file)
+    game_data = games[games.gameId==game_id].iloc[0, [0, 5, 6]] # pull the ID (col 0), home team (col 5), visitng team (col 6)
+    filepath = f'./games/{game_data.iloc[0]}_{game_data.iloc[1]}_{game_data.iloc[2]}'
+
+    # Create a directory for the game if none exists
+    if not os.path.exists(filepath):
+        os.makedirs(filepath)
+
+    # Sort and organize the data
+    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id))
+    sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
+
+    # Dictionary to store the overall tackle_percentage_contribution
+    game_tpc = {}
+
+    for key, play in sorted_game_data_organized: 
+        play_tpc = analyze_play(key, play, filepath, animation)
+        for player, contribution in play_tpc.items():
+            game_tpc[player] = game_tpc.get(player, 0) + contribution
+
+    # Convert game_tpc keys from int64 to string to store in JSON
+    game_tpc_converted = {str(key): value for key, value in game_tpc.items()}
+
+    # Cache this result as a JSON for each game
+    json.dump(game_tpc_converted, open(filepath + '/game_tpc_voronoi_unweighted.json', 'w'))
+
+    return game_tpc
+
+def analyze_play_unparallelized(play_number, game_id, tracking_file, plays_file='./data/plays.csv', players_file='./data/players.csv', game_file='./data/games.csv', animation:bool=False):
+    """ 
+    A method to analyze a game. Calling this will analyze and cache all the plays + the results of the analysis
+    Param: 
+    - game_id (int): the ID of the game as found in the Kaggle cleaned data
+    - tracking_file (str): the address of the file in which the tracking data is stored
+    - x_step, y_step (float): the x and y steps of each of the voronoi bins
+    - plays_file (str): the address of the plays file
+    - players_file (str): the filepath of the file containing players [TODO: CURRENTLY UNUSED.]
+    - game_file (str): the filepath of the file containing information about each game
+    """
+    
+    games = pd.read_csv(game_file)
+    game_data = games[games.gameId==game_id].iloc[0, [0, 5, 6]] # pull the ID (col 0), home team (col 5), visitng team (col 6)
+    filepath = f'./games/{game_data.iloc[0]}_{game_data.iloc[1]}_{game_data.iloc[2]}'
+
+    # Create a directory for the game if none exists
+    if not os.path.exists(filepath):
+        os.makedirs(filepath)
+
+    # Sort and organize the data
+    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id))
+    sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
+
+    # Dictionary to store the overall tackle_percentage_contribution
+    game_tpc = {}
+
+    for key, play in sorted_game_data_organized: 
+        if key != play_number: 
+            continue
+        play_tpc = analyze_play(key, play, filepath, animation)
+        for player, contribution in play_tpc.items():
+            game_tpc[player] = game_tpc.get(player, 0) + contribution
+
+    # Convert game_tpc keys from int64 to string to store in JSON
+    game_tpc_converted = {str(key): value for key, value in game_tpc.items()}
+
+    # Cache this result as a JSON for each game
+    json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))
+
+    return game_tpc

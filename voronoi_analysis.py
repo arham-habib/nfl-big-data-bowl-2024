@@ -19,13 +19,16 @@ def main():
     games = pd.read_csv(games_file)
 
     start_time = time.time()
-    for label, row in games.head(1).iterrows(): 
+    for label, row in games.iterrows(): 
         print(f"{label} ---- cumulative runtime: ", time.time() - start_time)
         try: 
             print(row)
             game_id = row.gameId
             week = row.week
-            results = NFLUtils.analyze_game(game_id=game_id, tracking_file=f'./data/tracking_week_{week}.csv', animation=True)
+            if label % 5 == 0: 
+                results = NFLUtils.analyze_game(game_id=game_id, tracking_file=f'./data/tracking_week_{week}.csv', animation=True)
+            else: 
+                results = NFLUtils.analyze_game(game_id=game_id, tracking_file=f'./data/tracking_week_{week}.csv', animation=False)
         except Exception as e: 
             print(e)
             continue
