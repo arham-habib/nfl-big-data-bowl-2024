@@ -3,4 +3,4 @@ git rm --cached *.csv
 *.json
 *.mp4
 voronoi_analysis_test.ipynb
-voronoi_analysis_test.ipynb
+games.zip

@@ -294,6 +294,35 @@ def recognize_blockers(df:pd.DataFrame):
 # ----------------------------------------------------------------------------------------------------------------------------------
 # Weighted Area Methods
 
+def sort_vertices_clockwise(vertices):
+    # Calculate the centroid of the polygon
+    centroid = np.mean(vertices, axis=0)
+
+    # Calculate the angle each vertex makes with the centroid
+    angles = np.arctan2(vertices[:, 1] - centroid[1], vertices[:, 0] - centroid[0])
+
+    # Sort vertices based on angles
+    sorted_indices = np.argsort(angles)
+    sorted_vertices = vertices[sorted_indices]
+
+    return sorted_vertices
+
+def point_in_polygon(x, y, vertices):
+    counter = 0
+    p1 = vertices[0]
+    N = len(vertices)
+    for i in range(1, N + 1):
+        p2 = vertices[i % N]
+        if y > min(p1[1], p2[1]):
+            if y <= max(p1[1], p2[1]):
+                if x <= max(p1[0], p2[0]):
+                    if p1[1] != p2[1]:
+                        xinters = (y - p1[1]) * (p2[0] - p1[0]) / (p2[1] - p1[1]) + p1[0]
+                        if p1[0] == p2[0] or x <= xinters:
+                            counter += 1
+        p1 = p2
+    return not (counter % 2 == 0)
+
 def angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y):
     vector_to_point = np.array([x - x_0, y - y_0])
     velocity_vector = np.array([velocity_x, velocity_y])
@@ -307,51 +336,64 @@ def angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y):
     return theta_degrees
 
 def weight_space(x_0,y_0, velocity_x, velocity_y, x, y, max_x=120, max_y=53.3):
-  # TO-DO: try scaling angle_from_velocity up by velocity, try scaling down penalty by distance instead of constant
-  angle_from_velocity = angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y)
-  angle_from_endzone = angle_from_vector(x_0, y_0, max_x - x_0, (max_y / 2) - y_0, x, y)
-  distance = np.sqrt((x - x_0)**2 + (y - y_0)**2)
-  speed = np.sqrt((velocity_x**2) + (velocity_y**2))
-  penalty = (angle_from_velocity + angle_from_endzone) / (360 * 4)
-  weight = 1 / (0.5 + distance**0.5) - penalty
-  return weight
+    angle_from_velocity = angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y)
+    angle_from_endzone = angle_from_vector(x_0, y_0, max_x - x_0, (max_y / 2) - y_0, x, y)
+    distance = np.sqrt((x - x_0)**2 + (y - y_0)**2)
+    speed = np.sqrt((velocity_x**2) + (velocity_y**2))
+    penalty = (angle_from_velocity + angle_from_endzone) / (360 * 4)
+    weight = 1 / (0.5 + distance**0.5) - penalty
+    return weight
 
-def trapezoidal_rule_triangle(x, y, f, x_0, y_0, velocity_x, velocity_y):
-    # Apply trapezoidal rule to a single triangle
-    area = 0.5 * (f(x_0, y_0, velocity_x, velocity_y, x[0], y[0]) + f(x_0, y_0, velocity_x, velocity_y, x[1], y[1]) +
-                  f(x_0, y_0, velocity_x, velocity_y, x[2], y[2]))
+def calculate_weighted_area(vertices, x_0, y_0, dir, speed, num_ticks_per_yard=5):
+    max_x = 120
+    max_y = 53.3
+    velocity_x = speed * np.sin(np.radians(dir))
+    velocity_y = speed * np.cos(np.radians(dir))
+
+    x_range = [round(0 + i * (1 / (num_ticks_per_yard)), 4) for i in range(0, int(max_x * num_ticks_per_yard))]
+    y_range = [round(0 + i * (1 / (num_ticks_per_yard)), 4) for i in range(0, int(max_y * num_ticks_per_yard))]
+
+    Z = np.zeros((len(x_range), len(y_range)))
+
+    for i, x_val in enumerate(x_range):
+        for j, y_val in enumerate(y_range):
+            Z[i, j] = weight_space(x_0, y_0, velocity_x, velocity_y,
+                                x_val + (1 / (2 * num_ticks_per_yard)),
+                                y_val + (1 / (2 * num_ticks_per_yard))) * (1 / num_ticks_per_yard)**2
+
+    min_value = np.min(Z)
+    max_value = np.max(Z)
+    Z_scaled = (Z - min_value) / (max_value - min_value)
+
+    bounding_min_x = max_x
+    bounding_max_x = 0
+    bounding_min_y = max_y
+    bounding_max_y = 0
+    for x,y in vertices:
+        if x > bounding_max_x:
+            bounding_max_x = x
+        if x < bounding_min_x:
+            bounding_min_x = x
+        if y > bounding_max_y:
+            bounding_max_y = y
+        if y < bounding_min_y:
+            bounding_min_y = y
+    bounding_min_x = bounding_min_x - (1 / num_ticks_per_yard)
+    bounding_max_x = bounding_max_x + (1 / num_ticks_per_yard)
+    bounding_min_y = bounding_min_y - (1 / num_ticks_per_yard)
+    bounding_max_y = bounding_max_y + (1 / num_ticks_per_yard)
+
+    vertices = sort_vertices_clockwise(vertices)
+    area = 0
+    for i, x_val in enumerate(x_range):
+        for j, y_val in enumerate(y_range):
+            if x_val >= bounding_min_x and x_val <= bounding_max_x and y_val >= bounding_min_y and y_val <= bounding_max_y:
+                x = round(x_val + (1 / (2 * num_ticks_per_yard)), 4)
+                y = round(y_val + (1 / (2 * num_ticks_per_yard)), 4)
+                if point_in_polygon(x, y, vertices):
+                    area += Z_scaled[i, j]
+
     return area
-
-def trapezoidal_weighted_area(vertices, f, x_0, y_0, velocity_x, velocity_y):
-    triangulation = Delaunay(vertices)
-
-    total_area = 0
-    for simplex in triangulation.simplices:
-        x_triangle = vertices[simplex, 0]
-        y_triangle = vertices[simplex, 1]
-        total_area += trapezoidal_rule_triangle(x_triangle, y_triangle, f, x_0, y_0, velocity_x, velocity_y)
-
-    return total_area
-
-def simpsons_rule_triangle(x, y, f, x_0, y_0, velocity_x, velocity_y):
-    # Apply Simpson's rule to a single triangle
-    area = (f(x_0, y_0, velocity_x, velocity_y, x[0], y[0]) +
-            4 * f(x_0, y_0, velocity_x, velocity_y, (x[0] + x[1]) / 2, (y[0] + y[1]) / 2) +
-            f(x_0, y_0, velocity_x, velocity_y, x[1], y[1]) +
-            4 * f(x_0, y_0, velocity_x, velocity_y, (x[1] + x[2]) / 2, (y[1] + y[2]) / 2) +
-            f(x_0, y_0, velocity_x, velocity_y, x[2], y[2])) / 6.0
-    return area
-
-def simpsons_weighted_area(vertices, f, x_0, y_0, velocity_x, velocity_y):
-    triangulation = Delaunay(vertices)
-
-    total_area = 0
-    for simplex in triangulation.simplices:
-        x_triangle = vertices[simplex, 0]
-        y_triangle = vertices[simplex, 1]
-        total_area += simpsons_rule_triangle(x_triangle, y_triangle, f, x_0, y_0, velocity_x, velocity_y)
-
-    return total_area
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------
 # TPC Methods
@@ -374,9 +416,9 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
 
     # get the minimum x, after which we will cut off voronoi analysis
     frame_data = calculate_voronoi_areas(frame_data)
-    # frame_data['weighted_voronoi_area'] = frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s)) # (weighted)
-    frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
-    frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
+    frame_data['weighted_voronoi_area'] = frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s)) # (weighted)
+    # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
+    # frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
     # print(f'baseline area of ball carrier: {baseline_area}')
     # print(f'initial blockers: {blockers}')
@@ -389,9 +431,9 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
         # take the frame data if that player didn't exist
         filtered_frame_data = frame_data[frame_data.nflId != player_id]
         filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
-        # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s))
-        filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area # toggle to weight area or not
-        filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # toggle to recognize adjacent players or not
+        filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s))
+        # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area # toggle to weight area or not
+        # filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # toggle to recognize adjacent players or not
         protected_area = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
         # DEBUG
         # print(f'{player_id} removed, blockers: {blockers}, protected area: {protected_area}')
@@ -445,14 +487,14 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
 
     # Save to CSV, with the index to make future multiplication easier
     # tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted.csv', index=True)
-    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_unweighted.csv', index=True)
+    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted_no_blockers.csv', index=True)
 
     # cast everything to strings from int64 (otherwise cannot store in JSON)
     total_tpc_converted = {int(key): value for key, value in total_tpc.items()}
 
     # cache this result as a JSON for each play
     # json.dump(total_tpc_converted, open(filepath+'/tpc_weighted.json', 'w'))
-    json.dump(total_tpc_converted, open(filepath+'/tpc_unweighted.json', 'w'))
+    json.dump(total_tpc_converted, open(filepath+'/tpc_weighted_no_blockers.json', 'w'))
     
     # if the animation method is called
     if animation: 
@@ -475,7 +517,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
         ani = FuncAnimation(fig, lambda x: animate(x, ax), frames=sorted(frame_dict.keys()), repeat=False)
         
         # Save the animation
-        ani.save(filepath + '/voronoi_visualizer_unweighted.mp4', writer='ffmpeg')
+        ani.save(filepath + '/voronoi_visualizer_weighted_no_blockers.mp4', writer='ffmpeg')
 
     return total_tpc
 
@@ -543,7 +585,7 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
 
     # Cache this result as a JSON for each game
     # json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))
-    json.dump(game_tpc_converted, open(filepath + '/game_tpc_unweighted.json', 'w'))
+    json.dump(game_tpc_converted, open(filepath + '/game_tpc_weighted_no_blockers.json', 'w'))
 
     return game_tpc
 
