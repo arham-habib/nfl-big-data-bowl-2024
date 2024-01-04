@@ -344,7 +344,7 @@ def weight_space(x_0,y_0, velocity_x, velocity_y, x, y, max_x=120, max_y=53.3):
     weight = 1 / (0.5 + distance**0.5) - penalty
     return weight
 
-def calculate_weighted_area(vertices, x_0, y_0, dir, speed, num_ticks_per_yard=5):
+def calculate_Z(x_0, y_0, dir, speed, num_ticks_per_yard=5):
     max_x = 120
     max_y = 53.3
     velocity_x = speed * np.sin(np.radians(dir))
@@ -360,10 +360,20 @@ def calculate_weighted_area(vertices, x_0, y_0, dir, speed, num_ticks_per_yard=5
             Z[i, j] = weight_space(x_0, y_0, velocity_x, velocity_y,
                                 x_val + (1 / (2 * num_ticks_per_yard)),
                                 y_val + (1 / (2 * num_ticks_per_yard))) * (1 / num_ticks_per_yard)**2
-
+            
     min_value = np.min(Z)
     max_value = np.max(Z)
-    Z_scaled = (Z - min_value) / (max_value - min_value)
+    Z = (Z - min_value) / (max_value - min_value)
+
+    return Z
+
+
+def calculate_weighted_area(vertices, Z, num_ticks_per_yard=5):
+    max_x = 120
+    max_y = 53.3
+
+    x_range = [round(0 + i * (1 / (num_ticks_per_yard)), 4) for i in range(0, int(max_x * num_ticks_per_yard))]
+    y_range = [round(0 + i * (1 / (num_ticks_per_yard)), 4) for i in range(0, int(max_y * num_ticks_per_yard))]
 
     bounding_min_x = max_x
     bounding_max_x = 0
@@ -382,8 +392,9 @@ def calculate_weighted_area(vertices, x_0, y_0, dir, speed, num_ticks_per_yard=5
     bounding_max_x = bounding_max_x + (1 / num_ticks_per_yard)
     bounding_min_y = bounding_min_y - (1 / num_ticks_per_yard)
     bounding_max_y = bounding_max_y + (1 / num_ticks_per_yard)
-
+    
     vertices = sort_vertices_clockwise(vertices)
+    
     area = 0
     for i, x_val in enumerate(x_range):
         for j, y_val in enumerate(y_range):
@@ -391,8 +402,7 @@ def calculate_weighted_area(vertices, x_0, y_0, dir, speed, num_ticks_per_yard=5
                 x = round(x_val + (1 / (2 * num_ticks_per_yard)), 4)
                 y = round(y_val + (1 / (2 * num_ticks_per_yard)), 4)
                 if point_in_polygon(x, y, vertices):
-                    area += Z_scaled[i, j]
-
+                    area += Z[i, j]
     return area
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -416,7 +426,8 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
 
     # get the minimum x, after which we will cut off voronoi analysis
     frame_data = calculate_voronoi_areas(frame_data)
-    frame_data['weighted_voronoi_area'] = frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s)) # (weighted)
+    Z = calculate_Z(x, y, dir, s)
+    frame_data['weighted_voronoi_area'] = frame_data.vertices.apply(calculate_weighted_area, args=(Z,)) # (weighted)
     # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
     # frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
@@ -424,14 +435,14 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     # print(f'initial blockers: {blockers}')
     
     # iterate through the IDs of the players
-    for player_id in frame_data.nflId.unique(): 
+    for player_id in frame_data.nflId.unique():
         # break for the ball_carrier     
         if offensive_players[player_id]: 
             continue
         # take the frame data if that player didn't exist
         filtered_frame_data = frame_data[frame_data.nflId != player_id]
         filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
-        filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.vertices.apply(calculate_weighted_area, args=(x, y, dir, s))
+        filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.vertices.apply(calculate_weighted_area, args=(Z,))
         # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area # toggle to weight area or not
         # filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # toggle to recognize adjacent players or not
         protected_area = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
@@ -462,7 +473,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
     frame_dict_sorted = sorted(frame_dict.items(), key=lambda x: x[0])
     # iterate through the frames of the play
     for key, frame in frame_dict_sorted: 
-        # print(f'################################## {key} ###############################')
+        print(f'################################## {key} ###############################')
 
         # get protected areas, append to both dictionaries
         frame_tpc = tackle_percentage_contribution_per_frame(frame)

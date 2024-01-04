@@ -13,6 +13,10 @@ from concurrent.futures import ProcessPoolExecutor
 # imports from the utils.py script
 import utils as NFLUtils
 
+# TODO: 
+# define the address of 'games.csv'
+# define the address of 'tracking_week_{week}.csv'
+
 def main(): 
 
     games_file = './data/games.csv'
