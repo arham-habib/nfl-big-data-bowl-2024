@@ -329,15 +329,26 @@ def angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y):
     magnitude_vector_to_point = np.linalg.norm(vector_to_point)
     magnitude_velocity_vector = np.linalg.norm(velocity_vector)
     dot_product = np.dot(velocity_vector, vector_to_point)
-    cosine_theta = np.clip(dot_product / (magnitude_velocity_vector * magnitude_vector_to_point), -1, 1)
-    theta_radians = np.arccos(cosine_theta)
+
+    try: 
+        cosine_theta = np.clip(dot_product / (magnitude_velocity_vector * magnitude_vector_to_point), -1, 1)
+        theta_radians = np.arccos(cosine_theta)
+            
+    except ValueError as e:
+        # Print the values of variables when the error occurs
+        print(f"Error: {e}")
+        print(f"dot_product: {dot_product}")
+        print(f"magnitude_velocity_vector: {magnitude_velocity_vector}")
+        print(f"magnitude_vector_to_point: {magnitude_vector_to_point}")
+
+    # Add more variables as needed
     theta_degrees = np.degrees(theta_radians)
-    abs_theta_degrees = np.abs(theta_degrees)
     return theta_degrees
 
 def weight_space(x_0,y_0, velocity_x, velocity_y, x, y, max_x=120, max_y=53.3):
     angle_from_velocity = angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y)
-    angle_from_endzone = angle_from_vector(x_0, y_0, max_x - x_0, (max_y / 2) - y_0, x, y)
+    angle_from_endzone = angle_from_vector(x_0, y_0, max_x - 10 - x_0, (max_y / 2) - y_0, x, y) # minus endzone length
+
     distance = np.sqrt((x - x_0)**2 + (y - y_0)**2)
     speed = np.sqrt((velocity_x**2) + (velocity_y**2))
     penalty = (angle_from_velocity + angle_from_endzone) / (360 * 4)
@@ -437,7 +448,7 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
 
     offensive_frame_data['weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=offensive_frame_data.vertices.copy(), Z=Z, vertices_to_area=vertices_to_area) # (weighted)
     # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
-    # frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
+    frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area = offensive_frame_data.loc[offensive_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
     # print(baseline_area)
     # print(f'baseline area of ball carrier: {baseline_area}')
@@ -457,7 +468,7 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
         # print(filtered_offensive_frame_data)
         filtered_offensive_frame_data['weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=filtered_offensive_frame_data.vertices.copy(), Z=Z, vertices_to_area=vertices_to_area) # (weighted)        
         # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area # toggle to weight area or not
-        # filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # toggle to recognize adjacent players or not
+        filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # toggle to recognize adjacent players or not
         protected_area = filtered_offensive_frame_data.loc[filtered_offensive_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
         # DEBUG
         # print(f'{player_id} removed, blockers: {blockers}, protected area: {protected_area}')
@@ -512,14 +523,14 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
 
     # Save to CSV, with the index to make future multiplication easier
     # tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted.csv', index=True)
-    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted_no_blockers.csv', index=True)
+    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted_blockers.csv', index=True)
 
     # cast everything to strings from int64 (otherwise cannot store in JSON)
     total_tpc_converted = {int(key): value for key, value in total_tpc.items()}
 
     # cache this result as a JSON for each play
     # json.dump(total_tpc_converted, open(filepath+'/tpc_weighted.json', 'w'))
-    json.dump(total_tpc_converted, open(filepath+'/tpc_weighted_no_blockers.json', 'w'))
+    json.dump(total_tpc_converted, open(filepath+'/tpc_weighted_blockers.json', 'w'))
     
     # if the animation method is called
     if animation: 
@@ -542,7 +553,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
         ani = FuncAnimation(fig, lambda x: animate(x, ax), frames=sorted(frame_dict.keys()), repeat=False)
         
         # Save the animation
-        ani.save(filepath + '/voronoi_visualizer_weighted_no_blockers.mp4', writer='ffmpeg')
+        ani.save(filepath + '/voronoi_visualizer_weighted_blockers.mp4', writer='ffmpeg')
 
     return total_tpc
 
@@ -610,7 +621,7 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
 
     # Cache this result as a JSON for each game
     # json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))
-    json.dump(game_tpc_converted, open(filepath + '/game_tpc_weighted_no_blockers.json', 'w'))
+    json.dump(game_tpc_converted, open(filepath + '/game_tpc_weighted_blockers.json', 'w'))
 
     return game_tpc
 
