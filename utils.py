@@ -18,6 +18,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------
 # Organizational methods
 
+# Organizational methods
+
 def load_game_data(tracking_file_path: str, plays_file_path: str, game_id: int, chunk_size:int = 10000)->pd.DataFrame:
     """
     Load rows from a CSV file that match a specific gameID
@@ -45,7 +47,107 @@ def load_game_data(tracking_file_path: str, plays_file_path: str, game_id: int, 
     data['is_offense'] = (data['possessionTeam'] == data['club'])
     return data
 
-def organize_game_data(df: pd.DataFrame)->dict:
+# def organize_game_data(df: pd.DataFrame)->dict:
+#     """
+#     Organize game data into a nested dictionary structure.
+
+#     Args:
+#     df (pd.DataFrame): The DataFrame containing game data.
+
+#     Returns:
+#     dict: A nested dictionary with plays as keys and dictionaries of data where the key is the frame and the values are data from that frame
+#     """
+
+#     # Initialize the main dictionary
+#     game_dict = {}
+
+#     # Iterate over each unique play in the DataFrame
+#     for play_id in df['playId'].unique():
+
+#         play_df = df[df['playId'] == play_id]
+#         play_events = play_df['event'].unique()
+
+
+#         #for now, ignoring fumbles, but maybe later on we can count that as a tackle?
+#         if 'fumble' in play_events:
+#           continue
+        
+#         play_df = play_df.copy()
+#         if play_df['playDirection'].iloc[0] == 'left':
+#           play_df['x'] = 120 - play_df['x']
+#           play_df['y'] = 53.3 - play_df['y']
+
+
+#         # Initialize the play's dictionary
+#         play_dict = {}
+
+#         start_frame = 1
+#         #another potentiall type of event to include is 'run', but for now i'm excluding that
+#         #because I'm not exactly sure what it means
+#         if 'pass_outcome_caught' in play_events:
+#           start_frame = play_df.loc[play_df['event'] == 'pass_outcome_caught']['frameId'].min()
+#         elif 'handoff' in play_events:
+#           start_frame = play_df.loc[play_df['event'] == 'handoff']['frameId'].min()
+#         else:
+#           continue
+
+#         #this limits us to plays where a tackle is made
+#         #not sure if we need special consideration for when a runner scores, so those plays are ignored for now
+#         #potentially could include 'out_of_bounds' and factor that into defensive play as well
+#         end_frame = 1
+#         if 'tackle' in play_events:
+#           end_frame = play_df.loc[play_df['event'] == 'tackle']['frameId'].min()
+#         else:
+#           continue
+
+#         # Iterate over each player in the play
+#         for frame_id in play_df['frameId'].unique():
+#             if (frame_id < start_frame) or (frame_id > end_frame):
+#               continue
+#             frame_df = play_df[play_df['frameId'] == frame_id]
+
+#             # Select and sort relevant columns
+#             columns = ['nflId', 'time', 'playDirection', 'x', 'y', 's', 'a', 'dis', 'o', 'dir', 'event', 'is_offense', 'ballCarrierId']
+#             frame_df = frame_df[columns]
+#             frame_df = frame_df.astype({'nflId': int, 'ballCarrierId': int})
+            
+#             # Add the player's DataFrame to the play's dictionary
+#             play_dict[frame_id] = frame_df
+
+#         # Add the play's dictionary to the main dictionary
+#         game_dict[play_id] = play_dict
+
+#     return game_dict
+
+
+# def load_game_data(tracking_file_path: str, plays_file_path: str, game_id: int, chunk_size:int = 10000)->pd.DataFrame:
+#     """
+#     Load rows from a CSV file that match a specific gameID
+
+#     Args:
+#     file_path (str): Path to the CSV file
+#     plays_file_path (str): path to the plays CSV file
+#     game_id (int): the gameID to filter by
+#     chunk_size (int, optional): the number of rows per chunk, default 10000
+
+#     Returns:
+#     pd.DataFrame: a DataFrame containing rows with the specified gameID
+#     """
+#     data = pd.DataFrame()
+#     # stream data in chunks
+#     for chunk in pd.read_csv(tracking_file_path, chunksize=chunk_size):
+#         filtered_chunk = chunk[chunk['gameId'] == game_id]
+#         # when no more matches, don't parse the rest of the file
+#         if filtered_chunk.shape[0] == 0:
+#             continue
+#         data = pd.concat([data, filtered_chunk], ignore_index=True)
+#     plays_df = pd.read_csv(plays_file_path)
+#     data = pd.merge(data, plays_df.loc[:,['gameId', 'playId', 'possessionTeam', 'ballCarrierId']], on=['gameId', 'playId'])
+#     data = data.loc[data['club'] != 'football']
+#     data['is_offense'] = (data['possessionTeam'] == data['club'])
+#     return data
+
+def organize_game_data(df: pd.DataFrame, valid_plays=None)->dict:
     """
     Organize game data into a nested dictionary structure.
 
@@ -59,46 +161,36 @@ def organize_game_data(df: pd.DataFrame)->dict:
     # Initialize the main dictionary
     game_dict = {}
 
-    # Iterate over each unique play in the DataFrame
-    for play_id in df['playId'].unique():
-
-        play_df = df[df['playId'] == play_id]
-        play_events = play_df['event'].unique()
-
-
-        #for now, ignoring fumbles, but maybe later on we can count that as a tackle?
-        if 'fumble' in play_events:
-          continue
+    # iterate through valid plays
+    for play_id in valid_plays.playId.unique():
         
-        play_df = play_df.copy()
+        # copy the data so that it can be transformed without inplace modification errors
+        play_df = df[df['playId'] == play_id].copy()
+
+        # Find the row corresponding to the given play_id
+        play_row = valid_plays[valid_plays['playId'] == play_id]
+
+        # Check if any rows match the play_id
+        if not play_row.empty:
+            # Extract the 'frameId_start' and 'frameId_end' values
+            start_frame = play_row['frameId_start'].values[0]
+            end_frame = play_row['frameId_end'].values[0]
+        else:
+            # Handle the case where no matching play_id was found
+            start_frame = None
+            end_frame = None
+
         if play_df['playDirection'].iloc[0] == 'left':
-          play_df['x'] = 120 - play_df['x']
-          play_df['y'] = 53.3 - play_df['y']
+            play_df['x'] = 120 - play_df['x']
+            play_df['y'] = 53.3 - play_df['y']
 
+        # clip the coordinates
+        play_df['x']= np.clip(play_df['x'], 0, 120)
+        play_df['y'] = np.clip(play_df['y'], 0, 160/3)
 
-        # Initialize the play's dictionary
+        # create the dictionary to store information from the play
         play_dict = {}
 
-        start_frame = 1
-        #another potentiall type of event to include is 'run', but for now i'm excluding that
-        #because I'm not exactly sure what it means
-        if 'pass_outcome_caught' in play_events:
-          start_frame = play_df.loc[play_df['event'] == 'pass_outcome_caught']['frameId'].min()
-        elif 'handoff' in play_events:
-          start_frame = play_df.loc[play_df['event'] == 'handoff']['frameId'].min()
-        else:
-          continue
-
-        #this limits us to plays where a tackle is made
-        #not sure if we need special consideration for when a runner scores, so those plays are ignored for now
-        #potentially could include 'out_of_bounds' and factor that into defensive play as well
-        end_frame = 1
-        if 'tackle' in play_events:
-          end_frame = play_df.loc[play_df['event'] == 'tackle']['frameId'].min()
-        else:
-          continue
-
-        # Iterate over each player in the play
         for frame_id in play_df['frameId'].unique():
             if (frame_id < start_frame) or (frame_id > end_frame):
               continue
@@ -132,7 +224,7 @@ def in_box(players, bounding_box):
                           np.logical_and(bounding_box[2] <= players[:, 1],
                                          players[:, 1] <= bounding_box[3]))
 
-def calculate_voronoi_areas(df, x_min:float=10, x_max=110, y_min=0, y_max=53.3, plot_graph:bool=False, tpc_dict:dict=None, ax=None): 
+def calculate_voronoi_areas(df, x_min:float=0, x_max=120, y_min=0, y_max=160/3, plot_graph:bool=False, tpc_dict:dict=None, ax=None): 
     """
     Custom Voronoi utils. TLDR: mirror the points over x_min, x_max, y_min, y_max to create a boundaries. Use shoelace method to calculate area of each region. Some become negative because of quirks w the floating point numbers
     
@@ -289,7 +381,7 @@ def recognize_blockers(df:pd.DataFrame):
     additional_area = df[df['nflId'].isin(blockers)]['weighted_voronoi_area'].sum()
     # Update the ball carrier's voronoi area
     df.loc[df['nflId'] == df['ballCarrierId'], 'weighted_voronoi_area'] += additional_area
-    return df, blockers
+    return df  # , blockers
 
 # ----------------------------------------------------------------------------------------------------------------------------------
 # Weighted Area Methods
@@ -307,119 +399,248 @@ def sort_vertices_clockwise(vertices):
 
     return sorted_vertices
 
-def point_in_polygon(x, y, vertices):
-    counter = 0
-    p1 = vertices[0]
+def point_in_polygon_vectorized(x, y, vertices):
     N = len(vertices)
-    for i in range(1, N + 1):
-        p2 = vertices[i % N]
-        if y > min(p1[1], p2[1]):
-            if y <= max(p1[1], p2[1]):
-                if x <= max(p1[0], p2[0]):
-                    if p1[1] != p2[1]:
-                        xinters = (y - p1[1]) * (p2[0] - p1[0]) / (p2[1] - p1[1]) + p1[0]
-                        if p1[0] == p2[0] or x <= xinters:
-                            counter += 1
-        p1 = p2
-    return not (counter % 2 == 0)
+    inside = np.zeros(x.shape, dtype=bool)
 
-def angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y):
-    vector_to_point = np.array([x - x_0, y - y_0])
+    x_vertices, y_vertices = vertices[:, 0], vertices[:, 1]
+    for i in range(N):
+        p1_x, p1_y = x_vertices[i % N], y_vertices[i % N]
+        p2_x, p2_y = x_vertices[(i + 1) % N], y_vertices[(i + 1) % N]
+
+        conditions = np.logical_and(
+            y > np.minimum(p1_y, p2_y),
+            y <= np.maximum(p1_y, p2_y)
+        )
+        conditions = np.logical_and(
+            conditions,
+            x <= np.maximum(p1_x, p2_x)
+        )
+
+        if p1_y != p2_y:
+            xinters = (y - p1_y) * (p2_x - p1_x) / (p2_y - p1_y) + p1_x
+            conditions = np.logical_and(
+                conditions,
+                np.logical_or(p1_x == p2_x, x <= xinters)
+            )
+
+        inside = np.logical_xor(inside, conditions)
+
+    return inside
+
+# def point_in_polygon(x, y, vertices):
+#     counter = 0
+#     p1 = vertices[0]
+#     N = len(vertices)
+#     for i in range(1, N + 1):
+#         p2 = vertices[i % N]
+#         if y > min(p1[1], p2[1]):
+#             if y <= max(p1[1], p2[1]):
+#                 if x <= max(p1[0], p2[0]):
+#                     if p1[1] != p2[1]:
+#                         xinters = (y - p1[1]) * (p2[0] - p1[0]) / (p2[1] - p1[1]) + p1[0]
+#                         if p1[0] == p2[0] or x <= xinters:
+#                             counter += 1
+#         p1 = p2
+#     return not (counter % 2 == 0)
+
+def angle_from_vector_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals):
+    vector_to_point = np.array([x_vals - x_0, y_vals - y_0])
     velocity_vector = np.array([velocity_x, velocity_y])
-    magnitude_vector_to_point = np.linalg.norm(vector_to_point)
+
+    # Calculating magnitudes
+    magnitude_vector_to_point = np.linalg.norm(vector_to_point, axis=0)
     magnitude_velocity_vector = np.linalg.norm(velocity_vector)
-    dot_product = np.dot(velocity_vector, vector_to_point)
 
-    try: 
+    # Element-wise multiplication and summing for dot product
+    dot_product = np.sum(velocity_vector[:, np.newaxis, np.newaxis] * vector_to_point, axis=0)
+
+    # Avoid division by zero
+    with np.errstate(divide='ignore', invalid='ignore'):
         cosine_theta = np.clip(dot_product / (magnitude_velocity_vector * magnitude_vector_to_point), -1, 1)
-        theta_radians = np.arccos(cosine_theta)
-            
-    except ValueError as e:
-        # Print the values of variables when the error occurs
-        print(f"Error: {e}")
-        print(f"dot_product: {dot_product}")
-        print(f"magnitude_velocity_vector: {magnitude_velocity_vector}")
-        print(f"magnitude_vector_to_point: {magnitude_vector_to_point}")
 
-    # Add more variables as needed
+    # Calculate angles
+    theta_radians = np.arccos(cosine_theta)
     theta_degrees = np.degrees(theta_radians)
+
+    # Setting angles to zero where either vector has zero magnitude
+    theta_degrees = np.where((magnitude_velocity_vector * magnitude_vector_to_point) == 0, 0, theta_degrees)
+
     return theta_degrees
 
-def weight_space(x_0,y_0, velocity_x, velocity_y, x, y, max_x=120, max_y=53.3):
-    angle_from_velocity = angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y)
-    angle_from_endzone = angle_from_vector(x_0, y_0, max_x - 10 - x_0, (max_y / 2) - y_0, x, y) # minus endzone length
+# def angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y):
+#     vector_to_point = np.array([x - x_0, y - y_0])
+#     velocity_vector = np.array([velocity_x, velocity_y])
+#     magnitude_vector_to_point = np.linalg.norm(vector_to_point)
+#     magnitude_velocity_vector = np.linalg.norm(velocity_vector)
+#     # if the players aren't moving, return 0 as the angle
+#     if magnitude_velocity_vector * magnitude_vector_to_point==0:
+#         return 0
+#     dot_product = np.dot(velocity_vector, vector_to_point)
+#     cosine_theta = np.clip(dot_product / (magnitude_velocity_vector * magnitude_vector_to_point), -1, 1)
+#     theta_radians = np.arccos(cosine_theta)
+#     # Add more variables as needed
+#     theta_degrees = np.degrees(theta_radians)
+#     return theta_degrees
 
-    distance = np.sqrt((x - x_0)**2 + (y - y_0)**2)
-    speed = np.sqrt((velocity_x**2) + (velocity_y**2))
+def weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals, max_x=120, max_y=53.3):
+    # Vectorized computation of angles
+    angle_from_velocity = angle_from_vector_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals)
+    angle_from_endzone = angle_from_vector_vectorized(x_0, y_0, max_x - 10 - x_0, (max_y / 2) - y_0, x_vals, y_vals)
+
+    # Vectorized computation of distance and speed
+    distance = np.sqrt((x_vals - x_0)**2 + (y_vals - y_0)**2)
+    speed = np.sqrt(velocity_x**2 + velocity_y**2)
+
+    # Applying the formula in a vectorized way
     penalty = (angle_from_velocity + angle_from_endzone) / (360 * 4)
-    weight = 1 / (0.5 + distance**0.5) - penalty
+    weight = 1 / (0.5 + np.sqrt(distance)) - penalty
+
     return weight
 
-def calculate_Z(x_0, y_0, dir, speed, num_ticks_per_yard=5):
+# def weight_space(x_0,y_0, velocity_x, velocity_y, x, y, max_x=120, max_y=53.3):
+#     angle_from_velocity = angle_from_vector(x_0, y_0, velocity_x, velocity_y, x, y)
+#     angle_from_endzone = angle_from_vector(x_0, y_0, max_x - 10 - x_0, (max_y / 2) - y_0, x, y) # minus endzone length
+
+#     distance = np.sqrt((x - x_0)**2 + (y - y_0)**2)
+#     speed = np.sqrt((velocity_x**2) + (velocity_y**2))
+#     penalty = (angle_from_velocity + angle_from_endzone) / (360 * 4)
+#     weight = 1 / (0.5 + distance**0.5) - penalty
+#     return weight
+
+def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=3):
     max_x = 120
     max_y = 53.3
     velocity_x = speed * np.sin(np.radians(dir))
     velocity_y = speed * np.cos(np.radians(dir))
 
-    x_range = [round(0 + i * (1 / (num_ticks_per_yard)), 4) for i in range(0, int(max_x * num_ticks_per_yard))]
-    y_range = [round(0 + i * (1 / (num_ticks_per_yard)), 4) for i in range(0, int(max_y * num_ticks_per_yard))]
+    # Vectorized generation of x_range and y_range
+    x_range = np.linspace(0, max_x, int(max_x * num_ticks_per_yard), endpoint=False)
+    y_range = np.linspace(0, max_y, int(max_y * num_ticks_per_yard), endpoint=False)
 
-    Z = np.zeros((len(x_range), len(y_range)))
+    # Creating meshgrid for x and y values
+    x_mesh, y_mesh = np.meshgrid(x_range, y_range, indexing='ij')
 
-    for i, x_val in enumerate(x_range):
-        for j, y_val in enumerate(y_range):
-            Z[i, j] = weight_space(x_0, y_0, velocity_x, velocity_y,
-                                x_val + (1 / (2 * num_ticks_per_yard)),
-                                y_val + (1 / (2 * num_ticks_per_yard))) * (1 / num_ticks_per_yard)**2
-            
-    min_value = np.min(Z)
-    max_value = np.max(Z)
-    Z = (Z - min_value) / (max_value - min_value)
+    # Adjust for the center of each cell and compute weights
+    Z = weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, 
+                                x_mesh + 1 / (2 * num_ticks_per_yard), 
+                                y_mesh + 1 / (2 * num_ticks_per_yard)) * (1 / num_ticks_per_yard)**2
+
+    # Normalize Z
+    Z = (Z - np.min(Z)) / (np.max(Z) - np.min(Z))
+
+    # Vectorized operation to set values to 0 for x_val >= 110
+    Z[x_mesh >= 110] = 0
 
     return Z
 
 
-def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=5, vertices_to_area=None):
-    
+
+# def calculate_Z(x_0, y_0, dir, speed, num_ticks_per_yard=3):
+#     max_x = 120
+#     max_y = 53.3
+#     velocity_x = speed * np.sin(np.radians(dir))
+#     velocity_y = speed * np.cos(np.radians(dir))
+
+#     x_range = [round(0 + i * (1 / (num_ticks_per_yard)), 4) for i in range(0, int(max_x * num_ticks_per_yard))]
+#     y_range = [round(0 + i * (1 / (num_ticks_per_yard)), 4) for i in range(0, int(max_y * num_ticks_per_yard))]
+
+#     Z = np.zeros((len(x_range), len(y_range)))
+
+#     for i, x_val in enumerate(x_range):
+#         for j, y_val in enumerate(y_range):
+#             Z[i, j] = weight_space(x_0, y_0, velocity_x, velocity_y,
+#                                 x_val + (1 / (2 * num_ticks_per_yard)),
+#                                 y_val + (1 / (2 * num_ticks_per_yard))) * (1 / num_ticks_per_yard)**2
+            
+#     min_value = np.min(Z)
+#     max_value = np.max(Z)
+#     Z = (Z - min_value) / (max_value - min_value)
+
+#     for i, x_val in enumerate(x_range):
+#         for j, y_val in enumerate(y_range): 
+#             if x_val >= 110: 
+#                 Z[i,j] = 0
+
+#     return Z
+
+def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=3, vertices_to_area=None):
     max_x = 120
     max_y = 53.3
-    
     result = []
 
-    for vertices in vertices_col: 
-    
+    for vertices in vertices_col:
         vertices = sort_vertices_clockwise(vertices)
-        # print(f'vertices: {vertices}')
-        
-        # if these vertices are cached, just return that result
-        if tuple(vertices.flatten()) in vertices_to_area.keys():
-            result.append(vertices_to_area[tuple(vertices.flatten())])
-            # print('return from cached')
+        flat_vertices = tuple(vertices.flatten())
+
+        # Use cached result if available
+        if flat_vertices in vertices_to_area:
+            result.append(vertices_to_area[flat_vertices])
             continue
 
-        bounding_min_x, bounding_max_x = min(x for x, _ in vertices), max(x for x, _ in vertices)
-        bounding_min_y, bounding_max_y = min(y for _, y in vertices), max(y for _, y in vertices)
+        # Vectorized bounding box calculations
+        bounding_min_x = max(np.min(vertices[:, 0]) - (1 / num_ticks_per_yard), 0)
+        bounding_max_x = min(np.max(vertices[:, 0]) + (1 / num_ticks_per_yard), max_x)
+        bounding_min_y = max(np.min(vertices[:, 1]) - (1 / num_ticks_per_yard), 0)
+        bounding_max_y = min(np.max(vertices[:, 1]) + (1 / num_ticks_per_yard), max_y)
 
-        bounding_min_x = max(bounding_min_x - (1 / num_ticks_per_yard), 0)
-        bounding_max_x = min(bounding_max_x + (1 / num_ticks_per_yard), max_x)
-        bounding_min_y = max(bounding_min_y - (1 / num_ticks_per_yard), 0)
-        bounding_max_y = min(bounding_max_y + (1 / num_ticks_per_yard), max_y)
-        
-        area = 0
-        for i in range(int(bounding_min_x * num_ticks_per_yard), int(bounding_max_x * num_ticks_per_yard)):
-                for j in range(int(bounding_min_y * num_ticks_per_yard), int(bounding_max_y * num_ticks_per_yard)):
-                    x_val = round(0 + i * (1 / (num_ticks_per_yard)), 4)
-                    y_val = round(0 + j * (1 / (num_ticks_per_yard)), 4)
-                    x = round(x_val + (1 / (2 * num_ticks_per_yard)), 4)
-                    y = round(y_val + (1 / (2 * num_ticks_per_yard)), 4)
-                    if point_in_polygon(x, y, vertices):
-                        area += Z[i, j]
+        # Generate a grid of points within the bounding box
+        x_vals = np.linspace(bounding_min_x, bounding_max_x, int((bounding_max_x - bounding_min_x) * num_ticks_per_yard))
+        y_vals = np.linspace(bounding_min_y, bounding_max_y, int((bounding_max_y - bounding_min_y) * num_ticks_per_yard))
+        grid_x, grid_y = np.meshgrid(x_vals, y_vals)
 
-        vertices_to_area[tuple(vertices.flatten())] = area
-        # print(f'calculated without cache', area)
+        # Vectorized point-in-polygon checks
+        mask = point_in_polygon_vectorized(grid_x, grid_y, vertices)
+
+        # Calculate area
+        area = np.sum(Z[mask])
+
+        vertices_to_area[flat_vertices] = area
         result.append(area)
 
     return np.array(result, dtype=float), vertices_to_area
+
+# def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=3, vertices_to_area=None):
+    
+#     max_x = 120
+#     max_y = 53.3
+    
+#     result = []
+
+#     for vertices in vertices_col: 
+    
+#         vertices = sort_vertices_clockwise(vertices)
+#         # print(f'vertices: {vertices}')
+        
+#         # if these vertices are cached, just return that result
+#         if tuple(vertices.flatten()) in vertices_to_area.keys():
+#             result.append(vertices_to_area[tuple(vertices.flatten())])
+#             # print('return from cached')
+#             continue
+
+#         bounding_min_x, bounding_max_x = min(x for x, _ in vertices), max(x for x, _ in vertices)
+#         bounding_min_y, bounding_max_y = min(y for _, y in vertices), max(y for _, y in vertices)
+
+#         bounding_min_x = max(bounding_min_x - (1 / num_ticks_per_yard), 0)
+#         bounding_max_x = min(bounding_max_x + (1 / num_ticks_per_yard), max_x)
+#         bounding_min_y = max(bounding_min_y - (1 / num_ticks_per_yard), 0)
+#         bounding_max_y = min(bounding_max_y + (1 / num_ticks_per_yard), max_y)
+        
+#         area = 0
+#         for i in range(int(bounding_min_x * num_ticks_per_yard), int(bounding_max_x * num_ticks_per_yard)):
+#                 for j in range(int(bounding_min_y * num_ticks_per_yard), int(bounding_max_y * num_ticks_per_yard)):
+#                     x_val = round(0 + i * (1 / (num_ticks_per_yard)), 4)
+#                     y_val = round(0 + j * (1 / (num_ticks_per_yard)), 4)
+#                     x = round(x_val + (1 / (2 * num_ticks_per_yard)), 4)
+#                     y = round(y_val + (1 / (2 * num_ticks_per_yard)), 4)
+#                     if point_in_polygon(x, y, vertices):
+#                         area += Z[i, j]
+
+#         vertices_to_area[tuple(vertices.flatten())] = area
+#         # print(f'calculated without cache', area)
+#         result.append(area)
+
+#     return np.array(result, dtype=float), vertices_to_area
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------
 # TPC Methods
@@ -438,39 +659,39 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     # get the ball carrier and offensive players
     ballCarrier = frame_data.ballCarrierId.iloc[0]
     x, y, dir, s = frame_data[frame_data.nflId==ballCarrier].iloc[0].loc[['x', 'y', 'dir', 's']]  # get the x, y, direction, and speed of the ball carrier for weighting method
-    offensive_players = dict(zip(frame_data.nflId, frame_data.is_offense)) # dict to store whether the player is offense or not
 
-    # get the minimum x, after which we will cut off voronoi analysis
-    frame_data = calculate_voronoi_areas(frame_data)
-    Z = calculate_Z(x, y, dir, s)
+    # calculate the weight of the field
+    Z = calculate_Z_vectorized(x, y, dir, s)
     vertices_to_area = {}
 
-
+    # calculate the weighted area of the ball carrier
+    frame_data = calculate_voronoi_areas(frame_data)
     frame_data['weighted_voronoi_area'] = float(0)
     frame_data.loc[frame_data.is_offense, 'weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=frame_data[frame_data.is_offense]['vertices'].copy(), Z=Z, vertices_to_area=vertices_to_area)
     # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
-    frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
+    frame_data = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+    ################ DEBUG ######################
     # print(baseline_area)
     # print(f'baseline area of ball carrier: {baseline_area}')
     # print(f'initial blockers: {blockers}')
     # print(vertices_to_area)
-    
-    # iterate through the IDs of the players
-    for player_id in frame_data.nflId.unique():
-        # break for the ball_carrier     
-        if offensive_players[player_id]: 
-            continue
+     
+    # iterate through the IDs of the players that are not offense
+    for player_id in frame_data.loc[~frame_data['is_offense'], 'nflId'].unique():
+
         # take the frame data if that player didn't exist
         filtered_frame_data = frame_data[frame_data.nflId != player_id].copy()
         # print(len(filtered_frame_data.nflId))
-        filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
 
+        # calculate the weighted voronoi areas of the ball carrier 
+        filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
         filtered_frame_data['weighted_voronoi_area'] = float(0)
         filtered_frame_data.loc[filtered_frame_data.is_offense, 'weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=filtered_frame_data[filtered_frame_data.is_offense]['vertices'].copy(), Z=Z, vertices_to_area=vertices_to_area)
         # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
-        filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # (toggle to recognize adjacent blockers or not)
+        filtered_frame_data = recognize_blockers(filtered_frame_data) # (toggle to recognize adjacent blockers or not)
         protected_area = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+
         # DEBUG
         # print(f'{player_id} removed, blockers: {blockers}, protected area: {protected_area}')
         # calculate how much additional space the offense gets
@@ -524,14 +745,14 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
 
     # Save to CSV, with the index to make future multiplication easier
     # tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted.csv', index=True)
-    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted_blockers.csv', index=True)
+    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted_blockers_check.csv', index=True)
 
     # cast everything to strings from int64 (otherwise cannot store in JSON)
-    total_tpc_converted = {int(key): value for key, value in total_tpc.items()}
+    # total_tpc_converted = {int(key): value for key, value in total_tpc.items()}
 
     # cache this result as a JSON for each play
     # json.dump(total_tpc_converted, open(filepath+'/tpc_weighted.json', 'w'))
-    json.dump(total_tpc_converted, open(filepath+'/tpc_weighted_blockers.json', 'w'))
+    # json.dump(total_tpc_converted, open(filepath+'/tpc_weighted_blockers.json', 'w'))
     
     # if the animation method is called
     if animation: 
@@ -602,7 +823,9 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
         os.makedirs(filepath)
 
     # Sort and organize the data
-    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id))
+    valid_plays = pd.read_csv('./data/eval_frame_df.csv')
+    valid_plays = valid_plays[valid_plays['gameId'] == game_id]
+    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id), valid_plays)
     sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
 
     # Dictionary to store the overall tackle_percentage_contribution
@@ -618,15 +841,15 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
                 game_tpc[player] = game_tpc.get(player, 0) + contribution
 
     # Convert game_tpc keys from int64 to string to store in JSON
-    game_tpc_converted = {int(key): value for key, value in game_tpc.items()}
+    # game_tpc_converted = {int(key): value for key, value in game_tpc.items()}
 
     # Cache this result as a JSON for each game
     # json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))
-    json.dump(game_tpc_converted, open(filepath + '/game_tpc_weighted_blockers.json', 'w'))
+    # json.dump(game_tpc_converted, open(filepath + '/game_tpc_weighted_blockers.json', 'w'))
 
     return game_tpc
 
-def analyze_game_unparallelized(game_id, tracking_file, plays_file='./data/plays.csv', players_file='./data/players.csv', game_file='./data/games.csv', animation:bool=False):
+def analyze_game_unparallelized(game_id, tracking_file, plays_file='./data/plays.csv', game_file='./data/games.csv', animation:bool=False):
     """ 
     A method to analyze a game. Calling this will analyze and cache all the plays + the results of the analysis
     Param: 
@@ -647,7 +870,10 @@ def analyze_game_unparallelized(game_id, tracking_file, plays_file='./data/plays
         os.makedirs(filepath)
 
     # Sort and organize the data
-    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id))
+    valid_plays = pd.read_csv('./data/eval_frame_df.csv')
+    valid_plays = valid_plays[valid_plays['gameId']==game_id]
+    print(valid_plays)
+    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id), valid_plays)
     sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
 
     # Dictionary to store the overall tackle_percentage_contribution
