@@ -1,18 +1,12 @@
 import pandas as pd
 import numpy as np
 import scipy as sp
-import time
 import os
 import json
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import matplotlib.path as mpltPath
-from matplotlib.collections import PatchCollection
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
-from shapely.geometry import Polygon, box, LineString, Point
-from shapely.ops import unary_union
-from scipy.spatial import Voronoi, cKDTree, ConvexHull, Delaunay
+from scipy.spatial import ConvexHull
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -47,107 +41,81 @@ def load_game_data(tracking_file_path: str, plays_file_path: str, game_id: int, 
     data['is_offense'] = (data['possessionTeam'] == data['club'])
     return data
 
-# def organize_game_data(df: pd.DataFrame)->dict:
-#     """
-#     Organize game data into a nested dictionary structure.
+def organize_game_data(df: pd.DataFrame)->dict:
+    """
+    Organize game data into a nested dictionary structure.
 
-#     Args:
-#     df (pd.DataFrame): The DataFrame containing game data.
+    Args:
+    df (pd.DataFrame): The DataFrame containing game data.
 
-#     Returns:
-#     dict: A nested dictionary with plays as keys and dictionaries of data where the key is the frame and the values are data from that frame
-#     """
+    Returns:
+    dict: A nested dictionary with plays as keys and dictionaries of data where the key is the frame and the values are data from that frame
+    """
 
-#     # Initialize the main dictionary
-#     game_dict = {}
+    # Initialize the main dictionary
+    game_dict = {}
 
-#     # Iterate over each unique play in the DataFrame
-#     for play_id in df['playId'].unique():
+    # Iterate over each unique play in the DataFrame
+    for play_id in df['playId'].unique():
 
-#         play_df = df[df['playId'] == play_id]
-#         play_events = play_df['event'].unique()
+        play_df = df[df['playId'] == play_id]
+        play_events = play_df['event'].unique()
 
 
-#         #for now, ignoring fumbles, but maybe later on we can count that as a tackle?
-#         if 'fumble' in play_events:
-#           continue
+        #for now, ignoring fumbles, but maybe later on we can count that as a tackle?
+        if 'fumble' in play_events:
+          continue
         
-#         play_df = play_df.copy()
-#         if play_df['playDirection'].iloc[0] == 'left':
-#           play_df['x'] = 120 - play_df['x']
-#           play_df['y'] = 53.3 - play_df['y']
+        play_df = play_df.copy()
+        if play_df['playDirection'].iloc[0] == 'left':
+          play_df['x'] = 120 - play_df['x']
+          play_df['y'] = 160/3 - play_df['y']
 
 
-#         # Initialize the play's dictionary
-#         play_dict = {}
+        # Initialize the play's dictionary
+        play_dict = {}
 
-#         start_frame = 1
-#         #another potentiall type of event to include is 'run', but for now i'm excluding that
-#         #because I'm not exactly sure what it means
-#         if 'pass_outcome_caught' in play_events:
-#           start_frame = play_df.loc[play_df['event'] == 'pass_outcome_caught']['frameId'].min()
-#         elif 'handoff' in play_events:
-#           start_frame = play_df.loc[play_df['event'] == 'handoff']['frameId'].min()
-#         else:
-#           continue
+        start_frame = 1
+        #another potentiall type of event to include is 'run', but for now i'm excluding that
+        #because I'm not exactly sure what it means
+        if 'pass_outcome_caught' in play_events:
+          start_frame = play_df.loc[play_df['event'] == 'pass_outcome_caught']['frameId'].min()
+        elif 'handoff' in play_events:
+          start_frame = play_df.loc[play_df['event'] == 'handoff']['frameId'].min()
+        else:
+          continue
 
-#         #this limits us to plays where a tackle is made
-#         #not sure if we need special consideration for when a runner scores, so those plays are ignored for now
-#         #potentially could include 'out_of_bounds' and factor that into defensive play as well
-#         end_frame = 1
-#         if 'tackle' in play_events:
-#           end_frame = play_df.loc[play_df['event'] == 'tackle']['frameId'].min()
-#         else:
-#           continue
+        #this limits us to plays where a tackle is made
+        #not sure if we need special consideration for when a runner scores, so those plays are ignored for now
+        #potentially could include 'out_of_bounds' and factor that into defensive play as well
+        end_frame = 1
+        if 'tackle' in play_events:
+          end_frame = play_df.loc[play_df['event'] == 'tackle']['frameId'].min()
+        else:
+          continue
 
-#         # Iterate over each player in the play
-#         for frame_id in play_df['frameId'].unique():
-#             if (frame_id < start_frame) or (frame_id > end_frame):
-#               continue
-#             frame_df = play_df[play_df['frameId'] == frame_id]
+        # Iterate over each player in the play
+        for frame_id in play_df['frameId'].unique():
+            if (frame_id < start_frame) or (frame_id > end_frame):
+              continue
+            frame_df = play_df[play_df['frameId'] == frame_id]
 
-#             # Select and sort relevant columns
-#             columns = ['nflId', 'time', 'playDirection', 'x', 'y', 's', 'a', 'dis', 'o', 'dir', 'event', 'is_offense', 'ballCarrierId']
-#             frame_df = frame_df[columns]
-#             frame_df = frame_df.astype({'nflId': int, 'ballCarrierId': int})
+            # Select and sort relevant columns
+            columns = ['nflId', 'time', 'playDirection', 'x', 'y', 's', 'a', 'dis', 'o', 'dir', 'event', 'is_offense', 'ballCarrierId']
+            frame_df = frame_df[columns]
+            frame_df = frame_df.astype({'nflId': int, 'ballCarrierId': int})
             
-#             # Add the player's DataFrame to the play's dictionary
-#             play_dict[frame_id] = frame_df
+            # Add the player's DataFrame to the play's dictionary
+            play_dict[frame_id] = frame_df
 
-#         # Add the play's dictionary to the main dictionary
-#         game_dict[play_id] = play_dict
+        # Add the play's dictionary to the main dictionary
+        game_dict[play_id] = play_dict
 
-#     return game_dict
+    return game_dict
 
 
-# def load_game_data(tracking_file_path: str, plays_file_path: str, game_id: int, chunk_size:int = 10000)->pd.DataFrame:
-#     """
-#     Load rows from a CSV file that match a specific gameID
-
-#     Args:
-#     file_path (str): Path to the CSV file
-#     plays_file_path (str): path to the plays CSV file
-#     game_id (int): the gameID to filter by
-#     chunk_size (int, optional): the number of rows per chunk, default 10000
-
-#     Returns:
-#     pd.DataFrame: a DataFrame containing rows with the specified gameID
-#     """
-#     data = pd.DataFrame()
-#     # stream data in chunks
-#     for chunk in pd.read_csv(tracking_file_path, chunksize=chunk_size):
-#         filtered_chunk = chunk[chunk['gameId'] == game_id]
-#         # when no more matches, don't parse the rest of the file
-#         if filtered_chunk.shape[0] == 0:
-#             continue
-#         data = pd.concat([data, filtered_chunk], ignore_index=True)
-#     plays_df = pd.read_csv(plays_file_path)
-#     data = pd.merge(data, plays_df.loc[:,['gameId', 'playId', 'possessionTeam', 'ballCarrierId']], on=['gameId', 'playId'])
-#     data = data.loc[data['club'] != 'football']
-#     data['is_offense'] = (data['possessionTeam'] == data['club'])
-#     return data
-
-def organize_game_data(df: pd.DataFrame, valid_plays=None)->dict:
+### This is organize_game_data based on the eval_df
+def organize_game_data_eval_df(df: pd.DataFrame, valid_plays=None)->dict:
     """
     Organize game data into a nested dictionary structure.
 
@@ -182,7 +150,7 @@ def organize_game_data(df: pd.DataFrame, valid_plays=None)->dict:
 
         if play_df['playDirection'].iloc[0] == 'left':
             play_df['x'] = 120 - play_df['x']
-            play_df['y'] = 53.3 - play_df['y']
+            play_df['y'] = 160/3 - play_df['y']
 
         # clip the coordinates
         play_df['x']= np.clip(play_df['x'], 0, 120)
@@ -483,7 +451,7 @@ def angle_from_vector_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_val
 #     theta_degrees = np.degrees(theta_radians)
 #     return theta_degrees
 
-def weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals, max_x=120, max_y=53.3):
+def weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals, max_x=120, max_y=160/3):
     # Vectorized computation of angles
     angle_from_velocity = angle_from_vector_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals)
     angle_from_endzone = angle_from_vector_vectorized(x_0, y_0, max_x - 10 - x_0, (max_y / 2) - y_0, x_vals, y_vals)
@@ -508,9 +476,9 @@ def weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals, ma
 #     weight = 1 / (0.5 + distance**0.5) - penalty
 #     return weight
 
-def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=3):
+def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=5):
     max_x = 120
-    max_y = 53.3
+    max_y = 160/3
     velocity_x = speed * np.sin(np.radians(dir))
     velocity_y = speed * np.cos(np.radians(dir))
 
@@ -564,9 +532,9 @@ def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=3):
 
 #     return Z
 
-def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=3, vertices_to_area=None):
+def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=5, vertices_to_area=None):
     max_x = 120
-    max_y = 53.3
+    max_y = 160/3
     result = []
 
     for vertices in vertices_col:
@@ -578,22 +546,31 @@ def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=3, vertices_to_a
             result.append(vertices_to_area[flat_vertices])
             continue
 
-        # Vectorized bounding box calculations
+        # Calculate bounding box of the polygon
         bounding_min_x = max(np.min(vertices[:, 0]) - (1 / num_ticks_per_yard), 0)
         bounding_max_x = min(np.max(vertices[:, 0]) + (1 / num_ticks_per_yard), max_x)
         bounding_min_y = max(np.min(vertices[:, 1]) - (1 / num_ticks_per_yard), 0)
         bounding_max_y = min(np.max(vertices[:, 1]) + (1 / num_ticks_per_yard), max_y)
 
         # Generate a grid of points within the bounding box
-        x_vals = np.linspace(bounding_min_x, bounding_max_x, int((bounding_max_x - bounding_min_x) * num_ticks_per_yard))
-        y_vals = np.linspace(bounding_min_y, bounding_max_y, int((bounding_max_y - bounding_min_y) * num_ticks_per_yard))
-        grid_x, grid_y = np.meshgrid(x_vals, y_vals)
+        x_vals = np.linspace(bounding_min_x, bounding_max_x, int((bounding_max_x - bounding_min_x) * num_ticks_per_yard), endpoint=True)
+        y_vals = np.linspace(bounding_min_y, bounding_max_y, int((bounding_max_y - bounding_min_y) * num_ticks_per_yard), endpoint=True)
 
-        # Vectorized point-in-polygon checks
+        if len(x_vals) == 0 or len(y_vals) == 0:
+            result.append(0)
+            continue
+
+        grid_x, grid_y = np.meshgrid(x_vals, y_vals, indexing='ij')
+
+        # Check which points are inside the polygon
         mask = point_in_polygon_vectorized(grid_x, grid_y, vertices)
 
-        # Calculate area
-        area = np.sum(Z[mask])
+        # Map grid coordinates to Z array indices
+        grid_x_indices = np.clip(np.round(grid_x * num_ticks_per_yard).astype(int), 0, Z.shape[0] - 1)
+        grid_y_indices = np.clip(np.round(grid_y * num_ticks_per_yard).astype(int), 0, Z.shape[1] - 1)
+
+        # Calculate weighted area
+        area = np.sum(Z[grid_x_indices, grid_y_indices][mask])
 
         vertices_to_area[flat_vertices] = area
         result.append(area)
@@ -662,6 +639,10 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
 
     # calculate the weight of the field
     Z = calculate_Z_vectorized(x, y, dir, s)
+
+    ############# DEBUG #####################
+    # print(Z)
+    # print(Z.shape)
     vertices_to_area = {}
 
     # calculate the weighted area of the ball carrier
@@ -671,10 +652,11 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
     frame_data = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+
     ################ DEBUG ######################
     # print(baseline_area)
     # print(f'baseline area of ball carrier: {baseline_area}')
-    # print(f'initial blockers: {blockers}')
+    # # print(f'initial blockers: {blockers}')
     # print(vertices_to_area)
      
     # iterate through the IDs of the players that are not offense
@@ -822,11 +804,16 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
     if not os.path.exists(filepath):
         os.makedirs(filepath)
 
-    # Sort and organize the data
-    valid_plays = pd.read_csv('./data/eval_frame_df.csv')
-    valid_plays = valid_plays[valid_plays['gameId'] == game_id]
-    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id), valid_plays)
+    # # Sort and organize the data (eval df)
+    # valid_plays = pd.read_csv('./data/eval_frame_df.csv')
+    # valid_plays = valid_plays[valid_plays['gameId']==game_id]
+    # game_data_organized = organize_game_data_eval_df(load_game_data(tracking_file, plays_file, game_id), valid_plays)
+    # sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
+        
+    # Sort and organize the data (no eval df)
+    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id))
     sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
+
 
     # Dictionary to store the overall tackle_percentage_contribution
     game_tpc = {}
