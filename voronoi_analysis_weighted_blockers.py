@@ -24,8 +24,8 @@ def main():
 
     start_time = time.time()
     for label, row in games.iterrows(): 
-        
-        if label%3 != 0: 
+
+        if label%2 != 0: 
             continue
 
         print(f"{label} ---- cumulative runtime: ", time.time() - start_time)

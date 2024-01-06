@@ -448,7 +448,7 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
 
     offensive_frame_data['weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=offensive_frame_data.vertices.copy(), Z=Z, vertices_to_area=vertices_to_area) # (weighted)
     # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
-    frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
+    offensive_frame_data, blockers = recognize_blockers(offensive_frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area = offensive_frame_data.loc[offensive_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
     # print(baseline_area)
     # print(f'baseline area of ball carrier: {baseline_area}')
@@ -468,7 +468,7 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
         # print(filtered_offensive_frame_data)
         filtered_offensive_frame_data['weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=filtered_offensive_frame_data.vertices.copy(), Z=Z, vertices_to_area=vertices_to_area) # (weighted)        
         # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area # toggle to weight area or not
-        filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # toggle to recognize adjacent players or not
+        filtered_offensive_frame_data, blockers = recognize_blockers(filtered_offensive_frame_data) # toggle to recognize adjacent players or not
         protected_area = filtered_offensive_frame_data.loc[filtered_offensive_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
         # DEBUG
         # print(f'{player_id} removed, blockers: {blockers}, protected area: {protected_area}')
