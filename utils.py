@@ -419,7 +419,7 @@ def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=5, vertices_to_a
         # print(f'calculated without cache', area)
         result.append(area)
 
-    return result, vertices_to_area
+    return np.array(result, dtype=float), vertices_to_area
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------
 # TPC Methods
@@ -442,14 +442,15 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
 
     # get the minimum x, after which we will cut off voronoi analysis
     frame_data = calculate_voronoi_areas(frame_data)
-    offensive_frame_data = frame_data[frame_data.nflId==frame_data.ballCarrierId].copy() # use only the offensive players to get the weighted area
     Z = calculate_Z(x, y, dir, s)
     vertices_to_area = {}
 
-    offensive_frame_data['weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=offensive_frame_data.vertices.copy(), Z=Z, vertices_to_area=vertices_to_area) # (weighted)
+
+    frame_data['weighted_voronoi_area'] = float(0)
+    frame_data.loc[frame_data.is_offense, 'weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=frame_data[frame_data.is_offense]['vertices'].copy(), Z=Z, vertices_to_area=vertices_to_area)
     # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
-    offensive_frame_data, blockers = recognize_blockers(offensive_frame_data) # (toggle to recognize adjacent blockers or not)
-    baseline_area = offensive_frame_data.loc[offensive_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+    frame_data, blockers = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
+    baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
     # print(baseline_area)
     # print(f'baseline area of ball carrier: {baseline_area}')
     # print(f'initial blockers: {blockers}')
@@ -464,12 +465,12 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
         filtered_frame_data = frame_data[frame_data.nflId != player_id].copy()
         # print(len(filtered_frame_data.nflId))
         filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
-        filtered_offensive_frame_data = filtered_frame_data[filtered_frame_data.nflId==filtered_frame_data.ballCarrierId].copy()
-        # print(filtered_offensive_frame_data)
-        filtered_offensive_frame_data['weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=filtered_offensive_frame_data.vertices.copy(), Z=Z, vertices_to_area=vertices_to_area) # (weighted)        
-        # filtered_frame_data['weighted_voronoi_area'] = filtered_frame_data.voronoi_area # toggle to weight area or not
-        filtered_offensive_frame_data, blockers = recognize_blockers(filtered_offensive_frame_data) # toggle to recognize adjacent players or not
-        protected_area = filtered_offensive_frame_data.loc[filtered_offensive_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+
+        filtered_frame_data['weighted_voronoi_area'] = float(0)
+        filtered_frame_data.loc[filtered_frame_data.is_offense, 'weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=filtered_frame_data[filtered_frame_data.is_offense]['vertices'].copy(), Z=Z, vertices_to_area=vertices_to_area)
+        # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
+        filtered_frame_data, blockers = recognize_blockers(filtered_frame_data) # (toggle to recognize adjacent blockers or not)
+        protected_area = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
         # DEBUG
         # print(f'{player_id} removed, blockers: {blockers}, protected area: {protected_area}')
         # calculate how much additional space the offense gets
