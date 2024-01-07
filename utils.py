@@ -476,7 +476,7 @@ def weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals, ma
 #     weight = 1 / (0.5 + distance**0.5) - penalty
 #     return weight
 
-def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=5):
+def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=10):
     max_x = 120
     max_y = 160/3
     velocity_x = speed * np.sin(np.radians(dir))
@@ -501,8 +501,6 @@ def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=5):
     Z[x_mesh >= 110] = 0
 
     return Z
-
-
 
 # def calculate_Z(x_0, y_0, dir, speed, num_ticks_per_yard=3):
 #     max_x = 120
@@ -532,7 +530,7 @@ def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=5):
 
 #     return Z
 
-def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=5, vertices_to_area=None):
+def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=10, vertices_to_area=None):
     max_x = 120
     max_y = 160/3
     result = []
@@ -632,7 +630,9 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     Returns: 
     - dictionary with keys of nflId and value of the tackle percentage contribution for that frame
     """
-    area_protected = {}
+    area_protected_blockers = {}
+    area_protected_no_blockers = {}
+
     # get the ball carrier and offensive players
     ballCarrier = frame_data.ballCarrierId.iloc[0]
     x, y, dir, s = frame_data[frame_data.nflId==ballCarrier].iloc[0].loc[['x', 'y', 'dir', 's']]  # get the x, y, direction, and speed of the ball carrier for weighting method
@@ -649,9 +649,11 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     frame_data = calculate_voronoi_areas(frame_data)
     frame_data['weighted_voronoi_area'] = float(0)
     frame_data.loc[frame_data.is_offense, 'weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=frame_data[frame_data.is_offense]['vertices'].copy(), Z=Z, vertices_to_area=vertices_to_area)
+
+    baseline_area_no_blockers = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0]
     # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
     frame_data = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
-    baseline_area = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+    baseline_area_blockers = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
 
     ################ DEBUG ######################
     # print(baseline_area)
@@ -671,16 +673,18 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
         filtered_frame_data['weighted_voronoi_area'] = float(0)
         filtered_frame_data.loc[filtered_frame_data.is_offense, 'weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=filtered_frame_data[filtered_frame_data.is_offense]['vertices'].copy(), Z=Z, vertices_to_area=vertices_to_area)
         # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
+        protected_area_no_blockers = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0]
         filtered_frame_data = recognize_blockers(filtered_frame_data) # (toggle to recognize adjacent blockers or not)
-        protected_area = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+        protected_area_blockers = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
 
         # DEBUG
         # print(f'{player_id} removed, blockers: {blockers}, protected area: {protected_area}')
         # calculate how much additional space the offense gets
         # print(f'protected: {protected_area}, baseline: {baseline_area}')
-        area_protected[player_id] = round(protected_area - baseline_area, 4)  # how much more area do they get?
+        area_protected_no_blockers[player_id] = round(protected_area_no_blockers - baseline_area_no_blockers, 4)  # how much more area do they get, not factoring in blockers?
+        area_protected_blockers[player_id] = round(protected_area_blockers - baseline_area_blockers, 4) # how much area do they get factoring in blockers?
 
-    return area_protected
+    return area_protected_blockers, area_protected_no_blockers
 
 def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, animation:bool=False): 
     """
@@ -696,7 +700,8 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
     """
     # empty dict, one indexed by player, the other indexed by frame
     total_tpc = {}
-    tpc_per_frame = {}
+    tpc_per_frame_blockers = {}
+    tpc_per_frame_no_blockers = {}
 
     # sort the frames
     frame_dict_sorted = sorted(frame_dict.items(), key=lambda x: x[0])
@@ -705,29 +710,39 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
         # print(f'################################## {key} ###############################')
 
         # get protected areas, append to both dictionaries
-        frame_tpc = tackle_percentage_contribution_per_frame(frame)
-        tpc_per_frame[key] = frame_tpc
+        frame_tpc_blockers, frame_tpc_no_blockers = tackle_percentage_contribution_per_frame(frame)
+        tpc_per_frame_blockers[key] = frame_tpc_blockers
+        tpc_per_frame_no_blockers[key] = frame_tpc_no_blockers
 
-        # append to the overall dict for the play
-        for player, contribution in frame_tpc.items():
-            if player in total_tpc.keys(): 
-                total_tpc[player] += contribution
-            else: 
-                total_tpc[player] = contribution
+    #     # append to the overall dict for the play
+    #     for player, contribution in frame_tpc_blockers.items():
+    #         if player in total_tpc.keys(): 
+    #             total_tpc[player] += contribution
+    #         else: 
+    #             total_tpc[player] = contribution
     
-    # normalize every player's contribution such that it sums to 1
-    total_protected_area = sum(total_tpc.values())
-    for key, value in total_tpc.items():
-        total_tpc[key] = value / total_protected_area
+    # # normalize every player's contribution such that it sums to 1
+    # total_protected_area = sum(total_tpc.values())
+    # for key, value in total_tpc.items():
+    #     total_tpc[key] = value / total_protected_area
 
 
     # Convert the dictionary with the frame data to a DataFrame to cache
     # The keys of the outer dict become the index, and the inner dicts' keys become the column names
-    tpc_per_frame_df = pd.DataFrame.from_dict(tpc_per_frame, orient='index')
+    tpc_per_frame_blockers_df = pd.DataFrame.from_dict(tpc_per_frame_blockers, orient='index')
+    tpc_per_frame_no_blockers_df = pd.DataFrame.from_dict(tpc_per_frame_no_blockers, orient='index')
+    
+    # rowsums to 1
+    row_sums_blockers = tpc_per_frame_blockers_df.sum(axis=1)
+    tpc_per_frame_blockers_df = tpc_per_frame_blockers_df.div(row_sums_blockers, axis=0)
+
+    row_sums_no_blockers = tpc_per_frame_no_blockers_df.sum(axis=1)
+    tpc_per_frame_no_blockers_df = tpc_per_frame_no_blockers_df.div(row_sums_no_blockers, axis=0)
 
     # Save to CSV, with the index to make future multiplication easier
     # tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted.csv', index=True)
-    tpc_per_frame_df.to_csv(f'{filepath}/tpc_per_frame_weighted_blockers_check.csv', index=True)
+    tpc_per_frame_blockers_df.to_csv(f'{filepath}/tpc_per_frame_weighted_blockers.csv', index=True)
+    tpc_per_frame_no_blockers_df.to_csv(f'{filepath}/tpc_per_frame_weighted_no_blockers.csv', index=True)
 
     # cast everything to strings from int64 (otherwise cannot store in JSON)
     # total_tpc_converted = {int(key): value for key, value in total_tpc.items()}
@@ -751,7 +766,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
             current_frame = frame_dict[frame_number]
 
             # Call the calculate_voronoi_areas function with plot_graph=True
-            calculate_voronoi_areas(current_frame, plot_graph=True, tpc_dict=tpc_per_frame[frame_number], ax=ax)
+            calculate_voronoi_areas(current_frame, plot_graph=True, tpc_dict=tpc_per_frame_blockers[frame_number], ax=ax)
 
         fig, ax = plt.subplots(figsize=(24, 16))
         ani = FuncAnimation(fig, lambda x: animate(x, ax), frames=sorted(frame_dict.keys()), repeat=False)
@@ -759,7 +774,7 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
         # Save the animation
         ani.save(filepath + '/voronoi_visualizer_weighted_blockers.mp4', writer='ffmpeg')
 
-    return total_tpc
+    return {}
 
 def analyze_play(key:int, play:dict, filepath:str, animation:bool):
     """
@@ -781,7 +796,7 @@ def analyze_play(key:int, play:dict, filepath:str, animation:bool):
         # Ensure that the tackle_percentage_contribution_per_play function is defined appropriately
         play_tpc = tackle_percentage_contribution_per_play(frame_dict=play, filepath=play_filepath, animation=animation)
 
-        return {player: contribution for player, contribution in play_tpc.items()}
+        return {}
     except Exception as e:
         print(f'Error processing play {key}: {e}')
         return {}
@@ -804,19 +819,21 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
     if not os.path.exists(filepath):
         os.makedirs(filepath)
 
-    # # Sort and organize the data (eval df)
-    # valid_plays = pd.read_csv('./data/eval_frame_df.csv')
-    # valid_plays = valid_plays[valid_plays['gameId']==game_id]
-    # game_data_organized = organize_game_data_eval_df(load_game_data(tracking_file, plays_file, game_id), valid_plays)
-    # sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
-        
-    # Sort and organize the data (no eval df)
-    game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id))
+    # Sort and organize the data (eval df)
+    valid_plays = pd.read_csv('./data/eval_frame_df.csv')
+    valid_plays = valid_plays[valid_plays.gameId==game_id]
+    if valid_plays.empty: 
+        return {}
+    game_data_organized = organize_game_data_eval_df(load_game_data(tracking_file, plays_file, game_id), valid_plays)
     sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
+        
+    # # Sort and organize the data (no eval df)
+    # game_data_organized = organize_game_data(load_game_data(tracking_file, plays_file, game_id))
+    # sorted_game_data_organized = sorted(game_data_organized.items(), key=lambda x: x[0])
 
 
     # Dictionary to store the overall tackle_percentage_contribution
-    game_tpc = {}
+    # game_tpc = {}
 
     # Using ProcessPoolExecutor to parallelize the loop
     with ProcessPoolExecutor() as executor:
@@ -824,8 +841,6 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
 
         for future in as_completed(futures):
             play_tpc = future.result()
-            for player, contribution in play_tpc.items():
-                game_tpc[player] = game_tpc.get(player, 0) + contribution
 
     # Convert game_tpc keys from int64 to string to store in JSON
     # game_tpc_converted = {int(key): value for key, value in game_tpc.items()}
@@ -834,7 +849,7 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
     # json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))
     # json.dump(game_tpc_converted, open(filepath + '/game_tpc_weighted_blockers.json', 'w'))
 
-    return game_tpc
+    return {}
 
 def analyze_game_unparallelized(game_id, tracking_file, plays_file='./data/plays.csv', game_file='./data/games.csv', animation:bool=False):
     """ 
