@@ -973,3 +973,115 @@ def analyze_play_unparallelized(play_number, game_id, tracking_file, plays_file=
     json.dump(game_tpc_converted, open(filepath + '/game_tpc.json', 'w'))
 
     return game_tpc
+
+def build_cpr_no_nan(a:bool, b:bool, c:bool, d:bool):
+    """
+    Build the constrictive presence ratio CSV
+    a: weighted_blockers
+    b: weighted_no_blockers
+    c: unweighted_blockers
+    d: unweighted_no_blockers
+    """    
+    # Read the 'eval_frame_df.csv' file
+    eval_frame_df = pd.read_csv(f'./data/eval_frame_df.csv')
+    finished = set()
+
+    # Iterate through rows of 'eval_frame_df'
+    for _, row in eval_frame_df.iterrows():
+        gameId = int(row['gameId'])
+        playId = int(row['playId'])
+        if (gameId, playId) in finished: 
+            continue
+        
+        # Look up the game in 'games.csv'
+        games_df = pd.read_csv('./data/games.csv')
+        game_info = games_df[(games_df['gameId'] == gameId)]
+        print(game_info)
+
+        if game_info.empty:
+            print(f"No game found for gameId: {gameId}")
+            continue
+
+        homeTeamAbbr = game_info['homeTeamAbbr'].values[0]
+        visitingTeamAbbr = game_info['visitorTeamAbbr'].values[0]
+
+        # Define the folder path
+        folder_path = f'./games/{gameId}_{homeTeamAbbr}_{visitingTeamAbbr}/{playId}/'
+
+        # Check if the folder exists and if the file exists
+        if not os.path.exists(folder_path):
+            print(f"Folder not found for gameId: {folder_path}")
+            finished.add((gameId, playId))
+            continue
+
+        if a: 
+            weighted_blockers = os.path.join(folder_path, 'tpc_per_frame_weighted_blockers.csv')
+        if b:
+            weighted_no_blockers = os.path.join(folder_path, 'tpc_per_frame_weighted_no_blockers.csv')
+        if c: 
+            unweighted_no_blockers = os.path.join(folder_path, 'tpc_per_frame_unweighted_no_blockers.csv')
+        if d: 
+            unweighted_blockers = os.path.join(folder_path, 'tpc_per_frame_unweighted.csv')
+
+        if not (os.path.exists(weighted_blockers) and os.path.exists(weighted_no_blockers)):
+            print(f"File not found for gameId: {gameId}, {playId}")
+            print(weighted_blockers)
+            finished.add((gameId, playId))
+            continue
+
+        # Read 'tpc_per_frame_weighted_blockers.csv'
+        if a: 
+            tpc_per_frame_weighted_blockers = pd.read_csv(weighted_blockers, index_col=0)
+            # tpc_per_frame_weighted_blockers = tpc_per_frame_weighted_blockers.fillna(0)
+            if tpc_per_frame_weighted_blockers.isna().any().any():
+                continue
+        if b: 
+            tpc_per_frame_weighted_no_blockers = pd.read_csv(weighted_no_blockers, index_col=0)
+            # tpc_per_frame_weighted_no_blockers = tpc_per_frame_weighted_no_blockers.fillna(0)
+            if tpc_per_frame_weighted_no_blockers.isna().any().any():
+                continue
+        if c: 
+            tpc_per_frame_unweighted_blockers = pd.read_csv(unweighted_blockers, index_col=0)
+            tpc_per_frame_unweighted_blockers = tpc_per_frame_unweighted_blockers.fillna(0)
+        if d: 
+            tpc_per_frame_unweighted_no_blockers = pd.read_csv(unweighted_no_blockers, index_col=0)
+            tpc_per_frame_unweighted_no_blockers = tpc_per_frame_unweighted_no_blockers.fillna(0)
+
+        # Sort 'eval_frame_df' by matching gameId and playId and sort it in order of frameId
+        sorted_eval_frame_df = eval_frame_df[(eval_frame_df['gameId'] == gameId) & (eval_frame_df['playId'] == playId)].sort_values(by='frameId')
+        filtered_eval_frame_df = sorted_eval_frame_df[sorted_eval_frame_df['frameId'].isin(tpc_per_frame_weighted_no_blockers.index)]
+        ######### DEBUG #########################
+        # print(filtered_eval_frame_df.index)
+
+        # Calculate the product
+        expected_yards_diff = filtered_eval_frame_df['expectedYardsByCarrier'].diff(-1).fillna(0)
+        expected_yards_diff.index = tpc_per_frame_weighted_blockers.index
+
+        # Check if the length of expected_yards_diff is the same as the number of rows in tpc_per_frame_weighted_blockers
+        if len(expected_yards_diff) == len(tpc_per_frame_weighted_blockers):
+            # Multiply each entry in the corresponding row by the value in expected_yards_diff
+            if a: 
+                cpr_weighted_blockers = tpc_per_frame_weighted_blockers.multiply(expected_yards_diff, axis=0)
+            if b: 
+                cpr_weighted_no_blockers = tpc_per_frame_weighted_no_blockers.multiply(expected_yards_diff, axis=0)
+            if c: 
+                cpr_unweighted_blockers = tpc_per_frame_unweighted_blockers.multiply(expected_yards_diff, axis=0)
+            if d: 
+                cpr_unweighted_no_blockers = tpc_per_frame_unweighted_no_blockers.multiply(expected_yards_diff, axis=0)
+        else:
+            # Print the shapes of both dataframes
+            print(f"Shapes do not match - expected_yards_diff shape: {len(expected_yards_diff)}, tpc_per_frame_weighted_blockers shape: {len(tpc_per_frame_weighted_blockers)}")
+            finished.add((gameId, playId))
+
+        if a:
+            cpr_weighted_blockers.to_csv(os.path.join(folder_path, 'cpr_weighted_blockers.csv'))
+        if b: 
+            cpr_weighted_no_blockers.to_csv(os.path.join(folder_path, 'cpr_weighted_no_blockers.csv'))
+        if c: 
+            cpr_unweighted_blockers.to_csv(os.path.join(folder_path, 'cpr_unweighted_blockers.csv'))
+        if d: 
+            cpr_unweighted_no_blockers.to_csv(os.path.join(folder_path, 'cpr_unweighted_no_blockers.csv'))
+
+        finished.add((gameId, playId))
+
+        print(f'success for {gameId}, {playId}')
