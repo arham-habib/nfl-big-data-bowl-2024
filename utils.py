@@ -394,6 +394,8 @@ def point_in_polygon_vectorized(x, y, vertices):
 
         inside = np.logical_xor(inside, conditions)
 
+    # inside[:] = True
+
     return inside
 
 # def point_in_polygon(x, y, vertices):
@@ -535,24 +537,37 @@ def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=10, vertices_to_
     max_y = 160/3
     result = []
 
+    x_range = np.linspace(0, max_x, int(max_x * num_ticks_per_yard), endpoint=False)
+    y_range = np.linspace(0, max_y, int(max_y * num_ticks_per_yard), endpoint=False)
+    x_range_delta, y_range_delta = x_range[1] - x_range[0], y_range[1] - y_range[0]
+
     for vertices in vertices_col:
         vertices = sort_vertices_clockwise(vertices)
         flat_vertices = tuple(vertices.flatten())
 
         # Use cached result if available
-        if flat_vertices in vertices_to_area:
-            result.append(vertices_to_area[flat_vertices])
-            continue
+        # if flat_vertices in vertices_to_area:
+        #     result.append(vertices_to_area[flat_vertices])
+        #     continue
 
         # Calculate bounding box of the polygon
-        bounding_min_x = max(np.min(vertices[:, 0]) - (1 / num_ticks_per_yard), 0)
-        bounding_max_x = min(np.max(vertices[:, 0]) + (1 / num_ticks_per_yard), max_x)
-        bounding_min_y = max(np.min(vertices[:, 1]) - (1 / num_ticks_per_yard), 0)
-        bounding_max_y = min(np.max(vertices[:, 1]) + (1 / num_ticks_per_yard), max_y)
+        bounding_min_x = next((x for x in reversed(x_range) if x <= np.min(vertices[:, 0]) - 1), 0)
+        bounding_max_x = next((x for x in x_range if x >= np.max(vertices[:, 0]) + 1), x_range[-1])
+        bounding_min_y = next((y for y in reversed(y_range) if y <= np.min(vertices[:, 1]) - 1), 0)
+        bounding_max_y = next((y for y in y_range if y >= np.max(vertices[:, 1]) + 1), y_range[-1])
+
+        # print(vertices)
+        # print(bounding_min_x, bounding_max_x)
+        # print(bounding_min_y, bounding_max_y)
 
         # Generate a grid of points within the bounding box
-        x_vals = np.linspace(bounding_min_x, bounding_max_x, int((bounding_max_x - bounding_min_x) * num_ticks_per_yard), endpoint=True)
-        y_vals = np.linspace(bounding_min_y, bounding_max_y, int((bounding_max_y - bounding_min_y) * num_ticks_per_yard), endpoint=True)
+        # Add x_range_delta / 2 and y_range_delta / 2 to consider center points of the boxes
+        x_vals = np.linspace(bounding_min_x + x_range_delta / 2, bounding_max_x + x_range_delta / 2, int((bounding_max_x - bounding_min_x) * num_ticks_per_yard) + 1, endpoint=True, dtype='float32') # [i + bounding_min_x for i in range(bounding_max_x - bounding_min_x)] # [x / 2.0 for x in range(241)
+        y_vals = np.linspace(bounding_min_y + y_range_delta / 2, bounding_max_y + y_range_delta / 2, int((bounding_max_y - bounding_min_y) * num_ticks_per_yard) + 1, endpoint=True, dtype='float32') # [i + bounding_min_y for i in range(bounding_max_y - bounding_min_y)] # [y / 2.0 for y in range(107)
+
+        # print('x and y vals')
+        # print(x_vals)
+        # print(y_vals)
 
         if len(x_vals) == 0 or len(y_vals) == 0:
             result.append(0)
@@ -564,8 +579,15 @@ def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=10, vertices_to_
         mask = point_in_polygon_vectorized(grid_x, grid_y, vertices)
 
         # Map grid coordinates to Z array indices
-        grid_x_indices = np.clip(np.round(grid_x * num_ticks_per_yard).astype(int), 0, Z.shape[0] - 1)
-        grid_y_indices = np.clip(np.round(grid_y * num_ticks_per_yard).astype(int), 0, Z.shape[1] - 1)
+        grid_x_indices = ((grid_x - x_range_delta / 2) / x_range_delta).astype(int)
+        grid_y_indices = ((grid_y - y_range_delta / 2) / y_range_delta).astype(int)
+
+        # sum = 0
+        # true_coords = np.array(np.where(mask)).T
+        # coords = {}
+        # for (x0, y0), value in zip(true_coords, Z[grid_x_indices, grid_y_indices][mask]):
+        #     print(f"({x_vals[x0]}, {y_vals[y0]}): {value}")
+        #     sum += value
 
         # Calculate weighted area
         area = np.sum(Z[grid_x_indices, grid_y_indices][mask])
@@ -640,20 +662,23 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
     # calculate the weight of the field
     Z = calculate_Z_vectorized(x, y, dir, s)
 
-    ############# DEBUG #####################
-    # print(Z)
-    # print(Z.shape)
     vertices_to_area = {}
 
     # calculate the weighted area of the ball carrier
     frame_data = calculate_voronoi_areas(frame_data)
+    # unweighted_baseline = frame_data[frame_data.nflId==ballCarrier]['voronoi_area'].iloc[0]
+    # print(f'unweighted baseline area no blockers: {unweighted_baseline}')
+
     frame_data['weighted_voronoi_area'] = float(0)
     frame_data.loc[frame_data.is_offense, 'weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=frame_data[frame_data.is_offense]['vertices'].copy(), Z=Z, vertices_to_area=vertices_to_area)
 
-    baseline_area_no_blockers = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0]
     # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
+    baseline_area_no_blockers = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0]
+    
     frame_data = recognize_blockers(frame_data) # (toggle to recognize adjacent blockers or not)
     baseline_area_blockers = frame_data.loc[frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
+
+    # print(f'weighted baseline area no blockers: {baseline_area_no_blockers}')
 
     ################ DEBUG ######################
     # print(baseline_area)
@@ -663,6 +688,7 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
      
     # iterate through the IDs of the players that are not offense
     for player_id in frame_data.loc[~frame_data['is_offense'], 'nflId'].unique():
+        # print(f'\nremoving defender {player_id}...')
 
         # take the frame data if that player didn't exist
         filtered_frame_data = frame_data[frame_data.nflId != player_id].copy()
@@ -670,6 +696,9 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
 
         # calculate the weighted voronoi areas of the ball carrier 
         filtered_frame_data = calculate_voronoi_areas(filtered_frame_data)
+        # unweighted_updated = filtered_frame_data[filtered_frame_data.nflId==ballCarrier]['voronoi_area'].iloc[0]
+        # print(f'updated unweighted area no blockers: {unweighted_updated}')
+
         filtered_frame_data['weighted_voronoi_area'] = float(0)
         filtered_frame_data.loc[filtered_frame_data.is_offense, 'weighted_voronoi_area'], vertices_to_area = calculate_weighted_area(vertices_col=filtered_frame_data[filtered_frame_data.is_offense]['vertices'].copy(), Z=Z, vertices_to_area=vertices_to_area)
         # frame_data['weighted_voronoi_area'] = frame_data.voronoi_area # (unweighted)
@@ -677,10 +706,16 @@ def tackle_percentage_contribution_per_frame(frame_data:pd.DataFrame)->dict:
         filtered_frame_data = recognize_blockers(filtered_frame_data) # (toggle to recognize adjacent blockers or not)
         protected_area_blockers = filtered_frame_data.loc[filtered_frame_data.nflId==ballCarrier, 'weighted_voronoi_area'].iloc[0] # baseline area of the ball carrier
 
+        # print(f'updated weighted area no blockers: {protected_area_no_blockers}')
+
         # DEBUG
         # print(f'{player_id} removed, blockers: {blockers}, protected area: {protected_area}')
         # calculate how much additional space the offense gets
         # print(f'protected: {protected_area}, baseline: {baseline_area}')
+
+        protected_area_blockers = max(protected_area_blockers, baseline_area_blockers) # handle floating point imprecision leading to small negatives
+        protected_area_no_blockers = max(protected_area_no_blockers, baseline_area_no_blockers) # handle floating point imprecision leading to small negatives
+
         area_protected_no_blockers[player_id] = round(protected_area_no_blockers - baseline_area_no_blockers, 4)  # how much more area do they get, not factoring in blockers?
         area_protected_blockers[player_id] = round(protected_area_blockers - baseline_area_blockers, 4) # how much area do they get factoring in blockers?
 
@@ -707,7 +742,9 @@ def tackle_percentage_contribution_per_play(frame_dict:dict, filepath:str, anima
     frame_dict_sorted = sorted(frame_dict.items(), key=lambda x: x[0])
     # iterate through the frames of the play
     for key, frame in frame_dict_sorted: 
-        # print(f'################################## {key} ###############################')
+        # print(f'\n**********************************************')
+        # print(f'analyzing frame {key}...')
+        # print(f'**********************************************\n')
 
         # get protected areas, append to both dictionaries
         frame_tpc_blockers, frame_tpc_no_blockers = tackle_percentage_contribution_per_frame(frame)
@@ -784,7 +821,7 @@ def analyze_play(key:int, play:dict, filepath:str, animation:bool):
     - play (dict): a dictionary of the frames (pd.DataFrame) of each play
     - filepath (str): the filepath of tha game within which we will save information/animations of the play
     """
-    print(key)  # For debugging purposes
+    print(f'analyzing play {key}...')  # For debugging purposes
 
     # Define the play's file path
     play_filepath = f'{filepath}/{key}'
@@ -810,6 +847,7 @@ def analyze_game(game_id, tracking_file, plays_file='./data/plays.csv', game_fil
     - plays_file (str): the address of the plays file
     - game_file (str): the filepath of the file containing information about each game
     """
+    print(f'analyzing game {game_id}...')
     
     games = pd.read_csv(game_file)
     game_data = games[games.gameId==game_id].iloc[0, [0, 5, 6]] # pull the ID (col 0), home team (col 5), visitng team (col 6)
