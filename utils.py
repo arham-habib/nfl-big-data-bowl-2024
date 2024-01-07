@@ -546,9 +546,9 @@ def calculate_weighted_area(vertices_col, Z, num_ticks_per_yard=10, vertices_to_
         flat_vertices = tuple(vertices.flatten())
 
         # Use cached result if available
-        # if flat_vertices in vertices_to_area:
-        #     result.append(vertices_to_area[flat_vertices])
-        #     continue
+        if flat_vertices in vertices_to_area:
+            result.append(vertices_to_area[flat_vertices])
+            continue
 
         # Calculate bounding box of the polygon
         bounding_min_x = next((x for x in reversed(x_range) if x <= np.min(vertices[:, 0]) - 1), 0)
