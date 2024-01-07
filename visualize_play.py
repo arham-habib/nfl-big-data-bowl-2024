@@ -24,13 +24,12 @@ def main():
 
     start_time = time.time()
     for label, row in games.iterrows(): 
-
-        print(f"{label} ---- cumulative runtime: ", time.time() - start_time)
         try: 
-            print(row)
             game_id = row.gameId
             week = row.week
-            results = NFLUtils.analyze_game(game_id=game_id, tracking_file=f'./data/tracking_week_{week}.csv', animation=False)
+            if game_id != 2022092500: #CHANGE ME!
+                continue
+            results = NFLUtils.analyze_game(game_id=game_id, tracking_file=f'./data/tracking_week_{week}.csv', animation=True)
         except Exception as e: 
             print(e)
             continue
