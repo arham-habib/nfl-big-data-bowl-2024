@@ -205,9 +205,9 @@ def calculate_voronoi_areas(df, x_min:float=0, x_max=120, y_min=0, y_max=160/3, 
     ax: if calling from another method, pass the axis
     """
     
-    # create a boundary 10 yards behind the ball carrier or 10 yds (start of endzone), whichever is greater
-    if not x_min: 
-        x_min = max(df[df.nflId==df.ballCarrierId.iloc[0]].x.iloc[0] - 10, 10)
+    # # create a boundary 10 yards behind the ball carrier or 10 yds (start of endzone), whichever is greater
+    # if not x_min: 
+    #     x_min = max(df[df.nflId==df.ballCarrierId.iloc[0]].x.iloc[0] - 10, 10)
 
     # filter points to the ones in the relevant region
     df_filtered = df[df['x'].between(x_min, x_max) & df['y'].between(y_min, y_max)].copy() # this seems redundant, but we need the df to be filtered to match each point to an nflId in the future. 
