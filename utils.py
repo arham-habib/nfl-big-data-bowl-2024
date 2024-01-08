@@ -10,22 +10,20 @@ from scipy.spatial import ConvexHull
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------
-# Organizational methods
-
-# Organizational methods
+# ORGANIZATIONAL METHODS: USED TO READ IN THE GAMES
 
 def load_game_data(tracking_file_path: str, plays_file_path: str, game_id: int, chunk_size:int = 10000)->pd.DataFrame:
     """
     Load rows from a CSV file that match a specific gameID
 
     Args:
-    file_path (str): Path to the CSV file
-    plays_file_path (str): path to the plays CSV file
-    game_id (int): the gameID to filter by
-    chunk_size (int, optional): the number of rows per chunk, default 10000
+    - file_path (str): Path to the CSV file
+    - plays_file_path (str): path to the plays CSV file
+    - game_id (int): the gameID to filter by
+    - chunk_size (int, optional): the number of rows per chunk, default 10000
 
     Returns:
-    pd.DataFrame: a DataFrame containing rows with the specified gameID
+    - pd.DataFrame: a DataFrame containing rows with the specified gameID
     """
     data = pd.DataFrame()
     # stream data in chunks
@@ -46,10 +44,10 @@ def organize_game_data(df: pd.DataFrame)->dict:
     Organize game data into a nested dictionary structure.
 
     Args:
-    df (pd.DataFrame): The DataFrame containing game data.
+    - df (pd.DataFrame): The DataFrame containing game data.
 
     Returns:
-    dict: A nested dictionary with plays as keys and dictionaries of data where the key is the frame and the values are data from that frame
+    - dict: A nested dictionary with plays as keys and dictionaries of data where the key is the frame and the values are data from that frame
     """
 
     # Initialize the main dictionary
@@ -113,17 +111,15 @@ def organize_game_data(df: pd.DataFrame)->dict:
 
     return game_dict
 
-
-### This is organize_game_data based on the eval_df
 def organize_game_data_eval_df(df: pd.DataFrame, valid_plays=None)->dict:
     """
-    Organize game data into a nested dictionary structure.
+    Organize game data into a nested dictionary structure. This method only reads in the methods in the eval_df used in the expected yards model. 
 
     Args:
-    df (pd.DataFrame): The DataFrame containing game data.
+    - df (pd.DataFrame): The DataFrame containing game data.
 
     Returns:
-    dict: A nested dictionary with plays as keys and dictionaries of data where the key is the frame and the values are data from that frame
+    - dict: A nested dictionary with plays as keys and dictionaries of data where the key is the frame and the values are data from that frame
     """
 
     # Initialize the main dictionary
