@@ -4,3 +4,4 @@ git rm --cached *.csv
 *.mp4
 voronoi_analysis_test.ipynb
 games.zip
+games_aws.zip
