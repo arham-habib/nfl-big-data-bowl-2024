@@ -478,38 +478,39 @@ def weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals, ma
 #     weight = 1 / (0.5 + distance**0.5) - penalty
 #     return weight
 
-def calculate_Z_vectorized(x, y, dir, speed, num_ticks_per_yard=5, endzone_length=10):
-    max_x = 120
-    max_y = 160/3
-    velocity_x = speed * np.sin(np.radians(dir))
-    velocity_y = speed * np.cos(np.radians(dir))
+## THIS IS THE UPDATED VERSION 
+# def calculate_Z_vectorized(x, y, dir, speed, num_ticks_per_yard=5, endzone_length=10):
+#     max_x = 120
+#     max_y = 160/3
+#     velocity_x = speed * np.sin(np.radians(dir))
+#     velocity_y = speed * np.cos(np.radians(dir))
 
-    # Vectorized generation of x_range and y_range
-    x_range = np.linspace(0, max_x, int(max_x * num_ticks_per_yard), endpoint=False)
-    y_range = np.linspace(0, max_y, int(max_y * num_ticks_per_yard), endpoint=False)
+#     # Vectorized generation of x_range and y_range
+#     x_range = np.linspace(0, max_x, int(max_x * num_ticks_per_yard), endpoint=False)
+#     y_range = np.linspace(0, max_y, int(max_y * num_ticks_per_yard), endpoint=False)
 
-    # Creating meshgrid for x and y values
-    x_mesh, y_mesh = np.meshgrid(x_range, y_range, indexing='ij')
+#     # Creating meshgrid for x and y values
+#     x_mesh, y_mesh = np.meshgrid(x_range, y_range, indexing='ij')
 
-    # Vectorized weight_penalty and weight_distance calculations
-    Z_p = weight_penalty_vectorized(x, y, velocity_x, velocity_y, x_mesh, y_mesh, max_x, max_y, endzone_length)
-    Z_d = weight_distance_vectorized(x, y, x_mesh, y_mesh)
+#     # Vectorized weight_penalty and weight_distance calculations
+#     Z_p = weight_penalty_vectorized(x, y, velocity_x, velocity_y, x_mesh, y_mesh, max_x, max_y, endzone_length)
+#     Z_d = weight_distance_vectorized(x, y, x_mesh, y_mesh)
 
-    min_value_p = np.min(Z_p)
-    max_value_p = np.max(Z_p)
-    # Rescale the matrix to be between 0 and 1 (min-max scaling)
-    Z_p_scaled = (Z_p - min_value_p) / (max_value_p - min_value_p)
+#     min_value_p = np.min(Z_p)
+#     max_value_p = np.max(Z_p)
+#     # Rescale the matrix to be between 0 and 1 (min-max scaling)
+#     Z_p_scaled = (Z_p - min_value_p) / (max_value_p - min_value_p)
 
-    min_value_d = np.min(Z_d)
-    max_value_d = np.max(Z_d)
-    # Rescale the matrix to be between 0 and 1 (min-max scaling)
-    Z_d_scaled = (Z_d - min_value_d) / (max_value_d - min_value_d)
+#     min_value_d = np.min(Z_d)
+#     max_value_d = np.max(Z_d)
+#     # Rescale the matrix to be between 0 and 1 (min-max scaling)
+#     Z_d_scaled = (Z_d - min_value_d) / (max_value_d - min_value_d)
 
-    Z_scaled = Z_p_scaled * Z_d_scaled
-    # Vectorized operation to set values to 0 for x_val >= 110
-    Z_scaled[x_mesh >= 110] = 0
-        
-    return Z_scaled
+#     Z_scaled = Z_p_scaled * Z_d_scaled
+#     # Vectorized operation to set values to 0 for x_val >= 110
+#     Z_scaled[x_mesh >= 110] = 0
+
+#     return Z_scaled
 
 def weight_penalty_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals, max_x, max_y, endzone_length):
     angle_from_velocity = angle_from_vector_vectorized(x_0, y_0, velocity_x, velocity_y, x_vals, y_vals)
@@ -523,31 +524,31 @@ def weight_distance_vectorized(x_0, y_0, x_vals, y_vals):
     return weight
 
 
-# def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=10):
-#     max_x = 120
-#     max_y = 160/3
-#     velocity_x = speed * np.sin(np.radians(dir))
-#     velocity_y = speed * np.cos(np.radians(dir))
+def calculate_Z_vectorized(x_0, y_0, dir, speed, num_ticks_per_yard=5):
+    max_x = 120
+    max_y = 160/3
+    velocity_x = speed * np.sin(np.radians(dir))
+    velocity_y = speed * np.cos(np.radians(dir))
 
-#     # Vectorized generation of x_range and y_range
-#     x_range = np.linspace(0, max_x, int(max_x * num_ticks_per_yard), endpoint=False)
-#     y_range = np.linspace(0, max_y, int(max_y * num_ticks_per_yard), endpoint=False)
+    # Vectorized generation of x_range and y_range
+    x_range = np.linspace(0, max_x, int(max_x * num_ticks_per_yard), endpoint=False)
+    y_range = np.linspace(0, max_y, int(max_y * num_ticks_per_yard), endpoint=False)
 
-#     # Creating meshgrid for x and y values
-#     x_mesh, y_mesh = np.meshgrid(x_range, y_range, indexing='ij')
+    # Creating meshgrid for x and y values
+    x_mesh, y_mesh = np.meshgrid(x_range, y_range, indexing='ij')
 
-#     # Adjust for the center of each cell and compute weights
-#     Z = weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, 
-#                                 x_mesh + 1 / (2 * num_ticks_per_yard), 
-#                                 y_mesh + 1 / (2 * num_ticks_per_yard)) * (1 / num_ticks_per_yard)**2
+    # Adjust for the center of each cell and compute weights
+    Z = weight_space_vectorized(x_0, y_0, velocity_x, velocity_y, 
+                                x_mesh + 1 / (2 * num_ticks_per_yard), 
+                                y_mesh + 1 / (2 * num_ticks_per_yard)) * (1 / num_ticks_per_yard)**2
 
-#     # Normalize Z
-#     Z = (Z - np.min(Z)) / (np.max(Z) - np.min(Z))
+    # Normalize Z
+    Z = (Z - np.min(Z)) / (np.max(Z) - np.min(Z))
 
-#     # Vectorized operation to set values to 0 for x_val >= 110
-#     Z[x_mesh >= 110] = 0
+    # Vectorized operation to set values to 0 for x_val >= 110
+    Z[x_mesh >= 110] = 0
 
-#     return Z
+    return Z
 
 # def calculate_Z(x_0, y_0, dir, speed, num_ticks_per_yard=3):
 #     max_x = 120
